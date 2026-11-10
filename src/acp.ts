@@ -23,10 +23,11 @@ import type {
 	SessionNotification,
 	StopReason,
 } from "@agentclientprotocol/sdk";
+import pkg from "../package.json" with { type: "json" };
 
 export const AGENT_PROFILE = "omp-host";
-export const CLIENT_NAME = "omp-antigravity";
-export const CLIENT_VERSION = "0.1.0";
+export const CLIENT_NAME = pkg.name;
+export const CLIENT_VERSION = pkg.version;
 
 /** Commands only the default agent offers; seeing one means the restricted profile did not apply. */
 const DEFAULT_AGENT_COMMANDS = new Set(["goal", "compact", "swarm", "agy-customizations", "antigravity-guide", "teamwork", "boost"]);
@@ -51,10 +52,7 @@ export type AdapterErrorCode =
 	| "timeout"
 	| "aborted"
 	| "process_exit"
-	| "native_activity"
 	| "tool_projection"
-	| "transport_limit"
-	| "turn_lost"
 	| "duplicate_request"
 	| "rate_limited";
 

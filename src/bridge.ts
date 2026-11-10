@@ -8,7 +8,7 @@ import type { Tool } from "@oh-my-pi/pi-ai";
 import { toolWireSchema } from "@oh-my-pi/pi-ai";
 import { Server, WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/server";
 import type { CallToolResult } from "@modelcontextprotocol/server";
-import { AdapterError } from "./acp.ts";
+import { AdapterError, CLIENT_NAME, CLIENT_VERSION } from "./acp.ts";
 
 /** MCP server name; Antigravity exposes its tools to the model as `mcp_omp_<tool>`. */
 export const BRIDGE_SERVER = "omp";
@@ -121,7 +121,7 @@ export class ToolBridge {
 
 	#mcpServer(): Server {
 		// Low-level server: OMP, not the MCP SDK, validates arguments against the real tool schema.
-		const server = new Server({ name: "omp-antigravity", version: "0.1.0" }, { capabilities: { tools: {} } });
+		const server = new Server({ name: CLIENT_NAME, version: CLIENT_VERSION }, { capabilities: { tools: {} } });
 		server.setRequestHandler("tools/list", async () => ({
 			tools: this.#tools.map(t => ({
 				name: t.mcpName,

@@ -164,7 +164,6 @@ class LiveSession {
 	carryUsage: PromptUsage | undefined;
 	broken: string | undefined;
 	closed = false;
-	lastOutcome: Outcome | undefined;
 	#batchTimer: Timer | undefined;
 	#batchStarted = 0;
 	#deferTimer: Timer | undefined;
@@ -225,12 +224,17 @@ class LiveSession {
 		if (leak) throw new AdapterError("profile", `Antigravity did not apply the restricted omp-host profile (offered /${leak})`);
 	}
 
+	/** Appends one ACP update or tool event to this session's OMP_ANTIGRAVITY_DEBUG trace. */
+	#trace(entry: Record<string, unknown>): void {
+		debugDump(`updates-${this.key.replace(/[^\w.-]/g, "_")}.jsonl`, { at: Date.now(), ...entry }, true);
+	}
+
 	// ---- inbound from agy -------------------------------------------------------------------
 
 	#onUpdate(notification: SessionNotification): void {
 		if (notification.sessionId !== this.acpSessionId && this.acpSessionId) return;
 		const update = notification.update;
-		debugDump(`updates-${this.key.replace(/[^\w.-]/g, "_")}.jsonl`, { at: Date.now(), update }, true);
+		this.#trace({ update });
 		this.#touch();
 		switch (update.sessionUpdate) {
 			case "agent_message_chunk":
@@ -283,7 +287,7 @@ class LiveSession {
 
 	#onCall(call: ParkedCall): void {
 		this.#touch();
-		debugDump(`updates-${this.key.replace(/[^\w.-]/g, "_")}.jsonl`, { at: Date.now(), parkedCall: { id: call.id, name: call.name, arguments: call.arguments } }, true);
+		this.#trace({ parkedCall: { id: call.id, name: call.name, arguments: call.arguments } });
 		if (this.closed || !this.prompt || this.prompt.cancelled) {
 			call.settle({ content: [{ type: "text", text: "No OMP turn is waiting for tool calls; end your turn." }], isError: true });
 			return;
@@ -309,7 +313,6 @@ class LiveSession {
 			if (!writer || writer.ended) return;
 			writer.finish("toolUse");
 			this.delivered.push(messageKey(writer.message));
-			this.lastOutcome = "toolUse";
 			this.#detachWriter();
 		}, wait);
 	}
@@ -354,7 +357,6 @@ class LiveSession {
 		const writer = this.writer;
 		if (writer && !writer.ended) {
 			writer.fail("error", `antigravity-acp: ${reason}. The turn was stopped; the next request rebuilds the session.`);
-			this.lastOutcome = "error";
 			this.#detachWriter();
 		}
 		void this.#cancelPrompt(`Stopped by omp-antigravity: ${reason}.`);
@@ -375,7 +377,6 @@ class LiveSession {
 		const writer = this.writer;
 		if (writer && !writer.ended) {
 			writer.fail("error", `antigravity-acp: Antigravity rate limit (429 RESOURCE_EXHAUSTED); turn cancelled without retries. ${notice}`, undefined, 429);
-			this.lastOutcome = "error";
 			this.#detachWriter();
 		}
 		void cancelling.finally(() => {
@@ -395,7 +396,6 @@ class LiveSession {
 		const writer = this.writer;
 		if (writer && !writer.ended) {
 			writer.fail("error", `antigravity-acp: ${reason}`);
-			this.lastOutcome = "error";
 			this.#detachWriter();
 		}
 		void this.runtime.closeLive(this, reason);
@@ -445,7 +445,6 @@ class LiveSession {
 		if (!writer || writer.ended) return;
 		writer.fail("aborted", "Request aborted");
 		this.delivered.push(messageKey(writer.message));
-		this.lastOutcome = "aborted";
 		// Keep this key's queue until agy confirms the cancel, so the next request finds the session idle
 		// instead of rebuilding around a turn that is still winding down.
 		const release = this.#releaseWriter;
@@ -556,7 +555,6 @@ class LiveSession {
 				writer.fail("error", `antigravity-acp: Antigravity stopped with ${result.stopReason}; output is incomplete`, usage);
 				outcome = "error";
 		}
-		this.lastOutcome = outcome;
 		if (outcome === "error") this.broken ??= `previous turn failed (${result.stopReason})`;
 		else this.delivered.push(messageKey(writer.message));
 		this.#detachWriter();
@@ -639,7 +637,7 @@ class LiveSession {
 		if (canInline) {
 			this.#attachWriter(writer, release, options.signal);
 			pending.forEach((call, i) => {
-				debugDump(`updates-${this.key.replace(/[^\w.-]/g, "_")}.jsonl`, { at: Date.now(), inlineResult: { id: call.id, name: call.name, result: inline[i] } }, true);
+				this.#trace({ inlineResult: { id: call.id, name: call.name, result: inline[i] } });
 				call.settle(inline[i]!);
 			});
 			const late = this.late;
