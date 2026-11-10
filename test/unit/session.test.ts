@@ -1,6 +1,6 @@
 // State-machine tests against a scripted fake `agy acp` (test/fixtures/fake-agy.ts). No network.
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -22,6 +22,8 @@ process.env.OMP_ANTIGRAVITY_HOME = home;
 process.env.OMP_ANTIGRAVITY_DEFER_MS = "1500";
 process.env.OMP_ANTIGRAVITY_ENV_PASSTHROUGH = "FAKE_AGY_LOG,FAKE_AGY_DEFAULT_AGENT";
 process.env.FAKE_AGY_LOG = logFile;
+// The cleanup under test is skipped when debug capture is on.
+delete process.env.OMP_ANTIGRAVITY_DEBUG;
 // Dynamic import: the module reads OMP_ANTIGRAVITY_* settings at load, so the env above must exist first.
 const { Runtime } = await import("../../src/session.ts");
 
@@ -243,22 +245,32 @@ describe("guards and lifecycle", () => {
 		expect(count("session/new", mark)).toBe(0);
 	});
 
-	test("closing OMP's provider state releases a parked call and its process", async () => {
+	test("closing OMP's provider state releases a parked call, its process, and agy's transcript", async () => {
 		const state = new Map<string, ProviderSessionState>();
 		const first = await run(runtime, [user('#fake:call read {"path":"y"}')], { sessionId: "closing", state });
 		expect(first.message.stopReason).toBe("toolUse");
-		const pid = runtime.snapshot().find(s => s.key === "closing")?.pid;
-		expect(pid).toBeNumber();
+		const live = runtime.snapshot().find(s => s.key === "closing");
+		expect(live?.pid).toBeNumber();
+		// agy's per-conversation files, plus another conversation's that must survive.
+		const appData = join(home, "gemini", "antigravity-cli");
+		const own = [join(appData, "brain", live!.acpSessionId, "logs"), join(appData, "conversations", `${live!.acpSessionId}.db`), join(appData, "annotations", `${live!.acpSessionId}.pbtxt`)];
+		const other = join(appData, "conversations", "other-conversation.db");
+		mkdirSync(own[0], { recursive: true });
+		mkdirSync(join(appData, "conversations"), { recursive: true });
+		mkdirSync(join(appData, "annotations"), { recursive: true });
+		for (const file of [own[1], own[2], other]) writeFileSync(file, "x");
 		state.get("antigravity-acp")?.close();
 		await waitFor(() => !runtime.sessions.has("closing"));
 		await waitFor(() => {
 			try {
-				process.kill(pid ?? 0, 0);
+				process.kill(live!.pid, 0);
 				return false;
 			} catch {
 				return true;
 			}
 		});
+		await waitFor(() => own.every(path => !existsSync(path)));
+		expect(existsSync(other)).toBe(true);
 	});
 
 	test("an unsupported exact effort is rejected, not substituted", async () => {

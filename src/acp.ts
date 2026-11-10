@@ -8,7 +8,7 @@
 //   (`manage_task`) and, with MCP attached, `list_resources`/`read_resource` remain declared; any
 //   call to a non-bridge tool fails the turn.
 // - Client HTTP MCP needs `--process-per-session`.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { client, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
@@ -202,6 +202,10 @@ export class AgentProcess {
 	readonly #proc: ReturnType<typeof Bun.spawn<"pipe", "pipe", "pipe">>;
 	readonly #conn: ReturnType<ReturnType<typeof client>["connect"]>;
 	readonly #log: { stderr: string };
+	/** agy's own data directory (`<gemini dir>/antigravity-cli`), where it stores each conversation. */
+	readonly #appData: string;
+	/** Conversations this process created; their transcripts are deleted when it closes. */
+	readonly #conversations = new Set<string>();
 	#closing: Promise<void> | undefined;
 
 	private constructor(
@@ -210,12 +214,14 @@ export class AgentProcess {
 		conn: ReturnType<ReturnType<typeof client>["connect"]>,
 		init: InitializeResponse,
 		log: { stderr: string },
+		geminiDir: string,
 	) {
 		this.path = path;
 		this.#proc = proc;
 		this.#conn = conn;
 		this.init = init;
 		this.#log = log;
+		this.#appData = join(geminiDir, "antigravity-cli");
 	}
 
 	get pid(): number {
@@ -280,7 +286,7 @@ export class AgentProcess {
 			if (init.protocolVersion !== PROTOCOL_VERSION) {
 				throw new AdapterError("protocol", `agy acp speaks ACP protocol ${init.protocolVersion}; omp-antigravity requires ${PROTOCOL_VERSION}`);
 			}
-			const agent = new AgentProcess(path, proc, conn, init, log);
+			const agent = new AgentProcess(path, proc, conn, init, log, options.profile.geminiDir);
 			void proc.exited.then(code => {
 				if (!agent.#closing) options.hooks.onExit(`agy acp exited unexpectedly (code ${code}): ${log.stderr.slice(-800)}`);
 			});
@@ -343,6 +349,7 @@ export class AgentProcess {
 			throw error;
 		}
 		const sessionId = created.sessionId;
+		this.#conversations.add(sessionId);
 		const models = modelChoices(created.configOptions);
 		if (!models) throw new AdapterError("capability", `${this.agentLabel} did not advertise a model selector`);
 		if (!models.values.some(v => v.value === spec.model)) {
@@ -400,7 +407,7 @@ export class AgentProcess {
 		return `${this.init.agentInfo?.name ?? "agy acp"} ${this.init.agentInfo?.version ?? "?"}`;
 	}
 
-	/** Idempotent teardown: end stdin, then TERM and KILL the process group. */
+	/** Idempotent teardown: end stdin, TERM then KILL the process group, then drop agy's transcripts. */
 	close(): Promise<void> {
 		this.#closing ??= (async () => {
 			try {
@@ -416,7 +423,11 @@ export class AgentProcess {
 			};
 			signal("SIGTERM");
 			const exited = await Promise.race([this.#proc.exited.then(() => true), Bun.sleep(2000).then(() => false)]);
-			if (!exited) signal("SIGKILL");
+			if (!exited) {
+				signal("SIGKILL");
+				await Promise.race([this.#proc.exited, Bun.sleep(1000)]);
+			}
+			this.#forgetConversations();
 		})();
 		return this.#closing;
 	}
@@ -426,6 +437,32 @@ export class AgentProcess {
 		try {
 			process.kill(-this.#proc.pid, "SIGKILL");
 		} catch {}
+		this.#forgetConversations();
+	}
+
+	/**
+	 * agy keeps a full transcript of every conversation (prompts, tool output) under its data
+	 * directory and offers no delete RPC. OMP's session file is the record, so the copy is removed
+	 * once the process is gone. OMP_ANTIGRAVITY_DEBUG keeps it for diagnosis.
+	 */
+	#forgetConversations(): void {
+		if (process.env.OMP_ANTIGRAVITY_DEBUG) return;
+		for (const id of this.#conversations) {
+			if (!/^[\w-]+$/.test(id)) continue;
+			const conversations = join(this.#appData, "conversations");
+			for (const target of [
+				join(this.#appData, "brain", id),
+				join(this.#appData, "annotations", `${id}.pbtxt`),
+				join(conversations, `${id}.db`),
+				join(conversations, `${id}.db-wal`),
+				join(conversations, `${id}.db-shm`),
+			]) {
+				try {
+					rmSync(target, { recursive: true, force: true });
+				} catch {}
+			}
+		}
+		this.#conversations.clear();
 	}
 
 	/**
@@ -450,6 +487,7 @@ export class AgentProcess {
 			}
 			throw error;
 		}
+		this.#conversations.add(created.sessionId);
 		const models = modelChoices(created.configOptions);
 		if (!models) return [];
 		const entries: CatalogEntry[] = [];
