@@ -181,13 +181,30 @@ describe("guards and lifecycle", () => {
 		expect(out.message.errorMessage).toContain("non-OMP tool (run_command)");
 	});
 
+	test("an OMP abort cancels the Antigravity turn and the session serves the next request", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const controller = new AbortController();
+		const mark = fakeLog().length;
+		const history: Message[] = [user("#fake:wait")];
+		const pending = run(runtime, history, { sessionId: "abort", state, signal: controller.signal });
+		await waitFor(() => count("session/prompt", mark) === 1);
+		controller.abort();
+		const aborted = await pending;
+		expect(aborted.message.stopReason).toBe("aborted");
+		await waitFor(() => count("session/cancel", mark) === 1);
+		history.push(aborted.message, user("hello again"));
+		const next = await run(runtime, history, { sessionId: "abort", state });
+		expect(next.message.stopReason).toBe("stop");
+		expect(count("session/new", mark)).toBe(1);
+	});
+
 	test("the first rate-limit notice cancels the turn with a 429 instead of riding agy's retries", async () => {
 		const mark = fakeLog().length;
 		const out = await run(runtime, [user("#fake:ratelimit")], { sessionId: "ratelimit" });
 		expect(out.message.stopReason).toBe("error");
 		expect(out.message.errorStatus).toBe(429);
 		expect(out.text).not.toContain("API error");
-		expect(count("session/cancel", mark)).toBe(1);
+		await waitFor(() => count("session/cancel", mark) === 1);
 	});
 
 	test("a default-agent fallback is refused before any prompt", async () => {

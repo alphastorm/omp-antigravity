@@ -363,13 +363,14 @@ class LiveSession {
 		if (this.rateLimited) return;
 		this.rateLimited = notice;
 		this.broken ??= "rate limited by Antigravity";
+		// Put the cancel on the wire before OMP sees the error and can decide to retry.
+		void this.#cancelPrompt("Cancelled by omp-antigravity after an Antigravity rate-limit notice.");
 		const writer = this.writer;
 		if (writer && !writer.ended) {
 			writer.fail("error", `antigravity-acp: Antigravity rate limit (429 RESOURCE_EXHAUSTED); turn cancelled without retries. ${notice}`, undefined, 429);
 			this.lastOutcome = "error";
 			this.#detachWriter();
 		}
-		void this.#cancelPrompt("Cancelled by omp-antigravity after an Antigravity rate-limit notice.");
 	}
 
 	/** Involuntary loss (process exit, protocol failure): surface it and tear down. */
@@ -430,11 +431,19 @@ class LiveSession {
 		writer.fail("aborted", "Request aborted");
 		this.delivered.push(messageKey(writer.message));
 		this.lastOutcome = "aborted";
+		// Keep this key's queue until agy confirms the cancel, so the next request finds the session idle
+		// instead of rebuilding around a turn that is still winding down.
+		const release = this.#releaseWriter;
+		this.#releaseWriter = undefined;
 		this.#detachWriter();
-		await this.#cancelPrompt("The OMP request was aborted.");
-		this.pending = [];
-		this.late = [];
-		this.deferred = false;
+		try {
+			await this.#cancelPrompt("The OMP request was aborted.");
+		} finally {
+			this.pending = [];
+			this.late = [];
+			this.deferred = false;
+			release?.();
+		}
 	}
 
 	/** Sends prompt parts; earlier parts are acknowledgement-only seeds whose output is discarded. */
