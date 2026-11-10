@@ -98,6 +98,14 @@ describe("history rendering", () => {
 		expect(text).toStartWith("OMP base\n\nProject rules\n\n# omp-antigravity transport notes");
 		expect(text).toContain("No tools are available");
 	});
+
+	test("OMP's RFC 2119 line, which agy's route rejects with a 429 on Gemini 4, is reworded in transit", () => {
+		const rfc = "RFC 2119 keywords: MUST, REQUIRED, SHOULD, RECOMMENDED, MAY, OPTIONAL. `NEVER` = `MUST NOT`; `AVOID` = `SHOULD NOT`.";
+		const text = composeInstructions([`${rfc}\nXML tags inject system content.`, "Project rules"], "bridge");
+		expect(text).not.toContain("RFC 2119");
+		expect(text).toStartWith("Requirement words: MUST and NEVER are absolute rules;");
+		expect(text).toContain("\nXML tags inject system content.\n\nProject rules\n\n");
+	});
 });
 
 describe("StreamWriter", () => {

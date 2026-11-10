@@ -27,8 +27,21 @@ export const INLINE_IMAGE_BUDGET = 1024 * 1024;
 const encoder = new TextEncoder();
 const byteLength = (text: string) => encoder.encode(text).length;
 
+/**
+ * OMP prompt text that agy 1.5.5's route rejects on Gemini 4 models with a misleading
+ * `429 RESOURCE_EXHAUSTED` on the first attempt, mapped to text with the same meaning. Found on
+ * 2026-11-10 by bisecting OMP's generated prompt against Gemini 4 Carbon: OMP's opening RFC 2119
+ * line alone reproduced the 429, while every other part of the prompt passed (README "Limits").
+ */
+const AGY_REWRITES: readonly (readonly [from: string, to: string])[] = [
+	[
+		"RFC 2119 keywords: MUST, REQUIRED, SHOULD, RECOMMENDED, MAY, OPTIONAL. `NEVER` = `MUST NOT`; `AVOID` = `SHOULD NOT`.",
+		"Requirement words: MUST and NEVER are absolute rules; SHOULD and AVOID are strong defaults that need a stated reason to break; MAY marks something optional.",
+	],
+];
+
 export function composeInstructions(systemPrompt: readonly string[] | undefined, profile: "bridge" | "tool-free"): string {
-	const host = (systemPrompt ?? []).join("\n\n").trim();
+	const host = AGY_REWRITES.reduce((text, [from, to]) => text.replaceAll(from, to), (systemPrompt ?? []).join("\n\n").trim());
 	const notes = [
 		"# omp-antigravity transport notes",
 		"You are serving an OMP (oh-my-pi) session through the Antigravity runtime. The OMP instructions above are authoritative.",
