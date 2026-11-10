@@ -1,5 +1,10 @@
 // Scripted stand-in for `agy acp`: ACP agent side over stdio plus an MCP client for the host bridge.
 // Prompt text directives drive it (see SCRIPT below); every request is logged to FAKE_AGY_LOG.
+// Environment knobs for failure modes:
+//   FAKE_AGY_DEFAULT_AGENT=1        offer default-agent commands (the restricted profile did not apply)
+//   FAKE_AGY_COMMANDS_DELAY_MS=<n>  send the command list <n> ms after session/new answers (default 5)
+//   FAKE_AGY_STALL_SEED=1           never acknowledge the first context delivery part until cancelled
+//   FAKE_AGY_STUBBORN=1             ignore SIGTERM and outlive stdin closing for 30 s
 import { appendFileSync } from "node:fs";
 import { agent, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import type { ContentBlock, McpServer, SessionConfigOption } from "@agentclientprotocol/sdk";
@@ -8,6 +13,8 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 const log = (entry: Record<string, unknown>) => {
 	if (process.env.FAKE_AGY_LOG) appendFileSync(process.env.FAKE_AGY_LOG, `${JSON.stringify({ pid: process.pid, ...entry })}\n`);
 };
+log({ method: "boot" });
+if (process.env.FAKE_AGY_STUBBORN) process.on("SIGTERM", () => {});
 
 let model = "gemini-test";
 let effort = "medium";
@@ -73,7 +80,7 @@ const app = agent({ name: "fake-agy" })
 				sessionId,
 				update: { sessionUpdate: "available_commands_update", availableCommands: commands.map(name => ({ name, description: name })) },
 			});
-		}, 5);
+		}, Number(process.env.FAKE_AGY_COMMANDS_DELAY_MS ?? 5));
 		return { sessionId, configOptions: configOptions() };
 	})
 	.onRequest("session/set_config_option", ({ params }) => {
@@ -100,6 +107,10 @@ const app = agent({ name: "fake-agy" })
 		const race = async <T>(work: Promise<T>) => Promise.race([work, cancelled]);
 		const usage = { inputTokens: 100, outputTokens: 7, cachedReadTokens: 50, cachedWriteTokens: 0, thoughtTokens: 2, totalTokens: 157 };
 		const done = (stopReason: "end_turn" | "cancelled") => ({ stopReason, usage });
+		if (process.env.FAKE_AGY_STALL_SEED && text.startsWith("[OMP delivery part 1/")) {
+			await cancelled;
+			return done("cancelled");
+		}
 
 		// Directives in replayed history are data; only the active request (after the replay) counts.
 		const active = text.slice(text.lastIndexOf("[end of OMP history]") + 1);
@@ -118,7 +129,9 @@ const app = agent({ name: "fake-agy" })
 			}
 			case "calls2": {
 				const [a, b] = (directive[2] ?? "read,grep").split(",");
-				const outcome = await race(Promise.all([callTool(a, { n: 1 }), callTool(b, { n: 2 })]));
+				// gapMs holds the second call back until the host has closed its batch.
+				const gap = Number(JSON.parse(directive[3] ?? "{}").gapMs ?? 0);
+				const outcome = await race(Promise.all([callTool(a, { n: 1 }), Bun.sleep(gap).then(() => callTool(b, { n: 2 }))]));
 				if (outcome === "cancelled") return done("cancelled");
 				await say(`results:${outcome.map(r => r.slice(0, 40)).join("|")}`);
 				return done("end_turn");
@@ -152,4 +165,5 @@ const stdout = new WritableStream<Uint8Array>({
 });
 const connection = app.connect(ndJsonStream(stdout, Bun.stdin.stream()));
 await connection.closed;
+if (process.env.FAKE_AGY_STUBBORN) await Bun.sleep(30_000);
 process.exit(0);

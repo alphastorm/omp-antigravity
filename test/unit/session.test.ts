@@ -20,7 +20,8 @@ const logFile = join(home, "fake.log");
 process.env.OMP_ANTIGRAVITY_AGY = join(import.meta.dir, "..", "fixtures", "fake-agy");
 process.env.OMP_ANTIGRAVITY_HOME = home;
 process.env.OMP_ANTIGRAVITY_DEFER_MS = "1500";
-process.env.OMP_ANTIGRAVITY_ENV_PASSTHROUGH = "FAKE_AGY_LOG,FAKE_AGY_DEFAULT_AGENT";
+process.env.OMP_ANTIGRAVITY_IDLE_TIMEOUT_MS = "2000";
+process.env.OMP_ANTIGRAVITY_ENV_PASSTHROUGH = "FAKE_AGY_LOG,FAKE_AGY_DEFAULT_AGENT,FAKE_AGY_COMMANDS_DELAY_MS,FAKE_AGY_STALL_SEED,FAKE_AGY_STUBBORN";
 process.env.FAKE_AGY_LOG = logFile;
 // The cleanup under test is skipped when debug capture is on.
 delete process.env.OMP_ANTIGRAVITY_DEBUG;
@@ -33,6 +34,15 @@ async function waitFor(condition: () => boolean, timeoutMs = 10_000): Promise<vo
 	while (!condition()) {
 		if (Date.now() > deadline) throw new Error("condition not met in time");
 		await Bun.sleep(25);
+	}
+}
+
+function alive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch {
+		return false;
 	}
 }
 
@@ -71,10 +81,25 @@ interface Outcome {
 	calls: { id: string; name: string; arguments: Record<string, unknown> }[];
 }
 
-async function run(runtime: InstanceType<typeof Runtime>, messages: Message[], options: { sessionId?: string; state?: Map<string, ProviderSessionState>; signal?: AbortSignal } = {}): Promise<Outcome> {
+interface RunOptions {
+	sessionId?: string;
+	/** Send no session id at all, as OMP's one-shot completions do. */
+	ephemeral?: boolean;
+	state?: Map<string, ProviderSessionState>;
+	signal?: AbortSignal;
+	onPayload?: SimpleStreamOptions["onPayload"];
+}
+
+async function run(runtime: InstanceType<typeof Runtime>, messages: Message[], options: RunOptions = {}): Promise<Outcome> {
 	const stream = new AssistantMessageEventStream();
 	const context: Context = { systemPrompt: ["You are a test agent."], messages, tools };
-	void runtime.stream(model, context, { sessionId: options.sessionId ?? "s1", providerSessionState: options.state ?? new Map(), signal: options.signal }, stream);
+	const streamOptions: SimpleStreamOptions = {
+		...(options.ephemeral ? {} : { sessionId: options.sessionId ?? "s1" }),
+		providerSessionState: options.state ?? new Map(),
+		signal: options.signal,
+		onPayload: options.onPayload,
+	};
+	void runtime.stream(model, context, streamOptions, stream);
 	let message: AssistantMessage | undefined;
 	for await (const event of stream) {
 		if (event.type === "done") message = event.message;
@@ -174,6 +199,20 @@ describe("tool continuation", () => {
 		const second = await run(runtime, history, { sessionId: "slow", state });
 		expect(second.text).toMatch(/tail=yes/);
 	});
+
+	test("a call that reaches the bridge after the batch closed is reported as not run when results travel as a prompt", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const mark = fakeLog().length;
+		const history: Message[] = [user('#fake:calls2 read,grep {"gapMs":400}')];
+		const first = await run(runtime, history, { sessionId: "late", state });
+		expect(first.calls.map(c => c.name)).toEqual(["read"]);
+		await waitFor(() => runtime.snapshot().find(s => s.key === "late")?.late === 1);
+		history.push(first.message, result(first.calls[0], `${"x".repeat(20_000)}\nTAIL-MARKER`));
+		const second = await run(runtime, history, { sessionId: "late", state });
+		expect(second.text).toMatch(/tail=yes/);
+		const delivery = fakeLog().slice(mark).findLast(e => e.method === "session/prompt");
+		expect(delivery?.text).toContain('### Not run: grep({"n":2})');
+	});
 });
 
 describe("guards and lifecycle", () => {
@@ -261,14 +300,7 @@ describe("guards and lifecycle", () => {
 		for (const file of [own[1], own[2], other]) writeFileSync(file, "x");
 		state.get("antigravity-acp")?.close();
 		await waitFor(() => !runtime.sessions.has("closing"));
-		await waitFor(() => {
-			try {
-				process.kill(live!.pid, 0);
-				return false;
-			} catch {
-				return true;
-			}
-		});
+		await waitFor(() => !alive(live!.pid));
 		await waitFor(() => own.every(path => !existsSync(path)));
 		expect(existsSync(other)).toBe(true);
 	});
@@ -281,5 +313,112 @@ describe("guards and lifecycle", () => {
 		const message = await stream.result().catch(e => e as AssistantMessage);
 		expect(message.stopReason).toBe("error");
 		expect(message.errorMessage).toContain('does not offer effort "xhigh"');
+	});
+
+	test("an abort before the prompt is sent does not count the transcript as delivered", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const controller = new AbortController();
+		const mark = fakeLog().length;
+		const history: Message[] = [user("FIRST-QUESTION")];
+		// OMP's onPayload hook runs right before the adapter's last abort check.
+		const aborted = await run(runtime, history, { sessionId: "unsent", state, signal: controller.signal, onPayload: () => void controller.abort() });
+		expect(aborted.message.stopReason).toBe("aborted");
+		expect(count("session/prompt", mark)).toBe(0);
+		history.push(aborted.message, user("SECOND-QUESTION"));
+		const next = await run(runtime, history, { sessionId: "unsent", state });
+		expect(next.message.stopReason).toBe("stop");
+		const seen = fakeLog().slice(mark).filter(e => e.method === "session/prompt").map(e => e.text).join("");
+		expect(seen).toContain("FIRST-QUESTION");
+		expect(seen).toContain("SECOND-QUESTION");
+	});
+
+	test("an abort while context is still being delivered cancels that turn, and the next request replays all of it", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const controller = new AbortController();
+		const mark = fakeLog().length;
+		const filler = Array.from({ length: 5000 }, (_, i) => `line ${i} ${"x".repeat(40)}`).join("\n");
+		const history: Message[] = [user(`EARLY-MARKER\n${filler}\nLATE-MARKER`)];
+		process.env.FAKE_AGY_STALL_SEED = "1";
+		let aborted: Outcome;
+		try {
+			const pending = run(runtime, history, { sessionId: "seed-abort", state, signal: controller.signal });
+			await waitFor(() => count("session/prompt", mark) === 1);
+			controller.abort();
+			aborted = await pending;
+		} finally {
+			delete process.env.FAKE_AGY_STALL_SEED;
+		}
+		expect(aborted.message.stopReason).toBe("aborted");
+		expect(count("session/cancel", mark)).toBe(1);
+		history.push(aborted.message, user("again"));
+		const next = await run(runtime, history, { sessionId: "seed-abort", state });
+		expect(next.message.stopReason).toBe("stop");
+		expect(count("session/new", mark)).toBe(2);
+		const replayed = fakeLog().slice(mark).filter(e => e.method === "session/prompt").slice(1).map(e => e.text).join("");
+		expect(replayed).toContain("EARLY-MARKER");
+		expect(replayed).toContain("LATE-MARKER");
+	});
+
+	test("a turn in which agy never emits anything fails at the idle timeout instead of hanging", async () => {
+		const out = await run(runtime, [user("#fake:wait")], { sessionId: "stall" });
+		expect(out.message.stopReason).toBe("error");
+		expect(out.message.errorMessage).toContain("no Antigravity progress");
+	});
+
+	test("a default-agent command list that arrives late is still refused before any prompt", async () => {
+		process.env.FAKE_AGY_DEFAULT_AGENT = "1";
+		process.env.FAKE_AGY_COMMANDS_DELAY_MS = "300";
+		try {
+			const mark = fakeLog().length;
+			const out = await run(runtime, [user("hello")], { sessionId: "late-fallback" });
+			expect(out.message.errorMessage).toContain("restricted omp-host profile");
+			expect(count("session/prompt", mark)).toBe(0);
+		} finally {
+			delete process.env.FAKE_AGY_DEFAULT_AGENT;
+			delete process.env.FAKE_AGY_COMMANDS_DELAY_MS;
+		}
+	});
+
+	test("closing the provider state while agy is still starting stops that process and sends nothing", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const mark = fakeLog().length;
+		const pending = run(runtime, [user("hello")], { sessionId: "early-close", state });
+		await waitFor(() => runtime.sessions.has("early-close"));
+		state.get("antigravity-acp")?.close();
+		const out = await pending;
+		expect(out.message.stopReason).toBe("error");
+		const since = fakeLog().slice(mark);
+		expect(since.filter(e => e.method === "session/prompt")).toEqual([]);
+		const boot = since.find(e => e.method === "boot");
+		if (boot) await waitFor(() => !alive(boot.pid));
+	});
+
+	test("a request without a session id gives up its agy process when its stream ends, even at toolUse", async () => {
+		const out = await run(runtime, [user('#fake:call read {"path":"e"}')], { ephemeral: true });
+		expect(out.message.stopReason).toBe("toolUse");
+		const live = runtime.snapshot().find(s => s.key.startsWith("ephemeral:"));
+		expect(live?.pid).toBeNumber();
+		await waitFor(() => !runtime.sessions.has(live!.key) && !alive(live!.pid), 3000);
+	});
+
+	test("shutdown kills an agy that is slow to exit, and its transcript, instead of orphaning both", async () => {
+		process.env.FAKE_AGY_STUBBORN = "1";
+		const own = new Runtime();
+		try {
+			await run(own, [user("hello")], { sessionId: "stubborn" });
+			const live = own.snapshot()[0];
+			const conversations = join(home, "gemini", "antigravity-cli", "conversations");
+			const transcript = join(conversations, `${live.acpSessionId}.db`);
+			mkdirSync(conversations, { recursive: true });
+			writeFileSync(transcript, "x");
+			// src/index.ts on session_shutdown: closeAll gets a moment, then killAll has to finish the job.
+			const closing = own.closeAll("OMP shut down");
+			own.killAll();
+			await waitFor(() => !alive(live.pid), 1000);
+			expect(existsSync(transcript)).toBe(false);
+			await closing;
+		} finally {
+			delete process.env.FAKE_AGY_STUBBORN;
+		}
 	});
 });

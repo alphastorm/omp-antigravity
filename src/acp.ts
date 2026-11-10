@@ -172,7 +172,7 @@ export interface SessionSelection {
 	efforts: string[];
 }
 
-function deadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+export function deadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
 	const { promise: timeout, reject } = Promise.withResolvers<never>();
 	const timer = setTimeout(() => reject(new AdapterError("timeout", `${what} timed out after ${Math.round(ms / 1000)}s`)), ms);
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
@@ -319,7 +319,6 @@ export class AgentProcess {
 		mcpServer?: McpServer;
 		model: string;
 		effort: string | undefined;
-		signal?: AbortSignal;
 	}): Promise<SessionSelection> {
 		const caps = this.capabilities;
 		if (!caps.appendInstructions) {
