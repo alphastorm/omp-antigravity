@@ -174,6 +174,8 @@ class LiveSession {
 	#acceptEmpty = false;
 	lastNotice: string | undefined;
 	rateLimited: string | undefined;
+	/** The last turn was cut off by a rate-limit notice; OMP's identical retry re-asks in place. */
+	retryAfterLimit = false;
 
 	constructor(key: string, scope: Scope, runtime: Runtime, desired: Desired) {
 		this.key = key;
@@ -358,19 +360,32 @@ class LiveSession {
 		void this.#cancelPrompt(`Stopped by omp-antigravity: ${reason}.`);
 	}
 
-	/** First quota/rate-limit notice: cancel instead of letting agy retry; OMP's own retry policy decides. */
+	/**
+	 * First quota/rate-limit notice: cancel instead of letting agy retry, so only OMP's retry policy
+	 * decides. The conversation stays usable: OMP's retry of the same context re-asks in place.
+	 */
 	#rateLimited(notice: string): void {
 		if (this.rateLimited) return;
 		this.rateLimited = notice;
-		this.broken ??= "rate limited by Antigravity";
+		// Keep this key's queue until agy confirms the cancel, so OMP's retry finds an idle session.
+		const release = this.#releaseWriter;
+		this.#releaseWriter = undefined;
 		// Put the cancel on the wire before OMP sees the error and can decide to retry.
-		void this.#cancelPrompt("Cancelled by omp-antigravity after an Antigravity rate-limit notice.");
+		const cancelling = this.#cancelPrompt("Cancelled by omp-antigravity after an Antigravity rate-limit notice.");
 		const writer = this.writer;
 		if (writer && !writer.ended) {
 			writer.fail("error", `antigravity-acp: Antigravity rate limit (429 RESOURCE_EXHAUSTED); turn cancelled without retries. ${notice}`, undefined, 429);
 			this.lastOutcome = "error";
 			this.#detachWriter();
 		}
+		void cancelling.finally(() => {
+			this.pending = [];
+			this.late = [];
+			this.deferred = false;
+			this.rateLimited = undefined;
+			this.retryAfterLimit = true;
+			release?.();
+		});
 	}
 
 	/** Involuntary loss (process exit, protocol failure): surface it and tear down. */
@@ -484,7 +499,11 @@ class LiveSession {
 				const result = await done;
 				this.prompt = undefined;
 				this.carryUsage = addUsage(this.carryUsage, result.usage);
-				if (this.rateLimited) throw new AdapterError("rate_limited", `Antigravity rate limit (429 RESOURCE_EXHAUSTED): ${this.rateLimited}`);
+				if (this.rateLimited) {
+					// agy saw only part of the replay; a retry must rebuild rather than re-ask.
+					this.broken ??= "rate limited while delivering earlier context parts";
+					throw new AdapterError("rate_limited", `Antigravity rate limit (429 RESOURCE_EXHAUSTED): ${this.rateLimited}`);
+				}
 				if (result.stopReason !== "end_turn") throw new AdapterError("protocol", `Antigravity stopped a context delivery part with ${result.stopReason}`);
 				continue;
 			}
@@ -572,9 +591,17 @@ class LiveSession {
 	}
 
 	async warm(delta: readonly Message[], writer: StreamWriter, release: () => void, options: SimpleStreamOptions, model: Model): Promise<void> {
+		this.retryAfterLimit = false;
 		this.delivered.push(...delta.map(messageKey));
 		const parts = packPrompts([...inputSegments(delta), ...choiceNote(options)]);
 		await this.#send(parts, writer, release, options, model);
+	}
+
+	/** OMP retried a turn that a rate-limit notice cut off: agy already holds the request, so re-ask. */
+	async retryTurn(writer: StreamWriter, release: () => void, options: SimpleStreamOptions, model: Model): Promise<void> {
+		this.retryAfterLimit = false;
+		const note = "[OMP retry]\nYour previous turn was cut off by a rate-limit error before you finished. Respond to the latest OMP message now.\n";
+		await this.#send(packPrompts([note, ...choiceNote(options)]), writer, release, options, model);
 	}
 
 	/** Matches the request against parked calls; returns the reason it cannot continue, if any. */
@@ -771,6 +798,10 @@ export class Runtime {
 				const keys = context.messages.map(messageKey);
 				const sameHistory = isPrefix(live.delivered, keys);
 				if (!live.broken && live.desired.fingerprint === desired.fingerprint && sameHistory && keys.length === live.delivered.length) {
+					if (live.retryAfterLimit && !live.prompt) {
+						await live.retryTurn(writer, release, options, model);
+						return;
+					}
 					// Nothing new (e.g. a cache-warming replay): never turn that into a real generation.
 					throw new AdapterError("duplicate_request", "request contains no messages Antigravity has not already answered");
 				}

@@ -198,13 +198,21 @@ describe("guards and lifecycle", () => {
 		expect(count("session/new", mark)).toBe(1);
 	});
 
-	test("the first rate-limit notice cancels the turn with a 429 instead of riding agy's retries", async () => {
+	test("the first rate-limit notice cancels the turn with a 429, and OMP's retry re-asks in place", async () => {
+		const state = new Map<string, ProviderSessionState>();
 		const mark = fakeLog().length;
-		const out = await run(runtime, [user("#fake:ratelimit")], { sessionId: "ratelimit" });
+		const history: Message[] = [user("#fake:ratelimit")];
+		const out = await run(runtime, history, { sessionId: "ratelimit", state });
 		expect(out.message.stopReason).toBe("error");
 		expect(out.message.errorStatus).toBe(429);
 		expect(out.text).not.toContain("API error");
 		await waitFor(() => count("session/cancel", mark) === 1);
+		// OMP's retry drops the failed message and sends the same context again.
+		const retried = await run(runtime, history, { sessionId: "ratelimit", state });
+		expect(retried.message.stopReason).toBe("stop");
+		expect(count("session/new", mark)).toBe(1);
+		const prompts = fakeLog().slice(mark).filter(e => e.method === "session/prompt");
+		expect(prompts.at(-1)?.text).toContain("[OMP retry]");
 	});
 
 	test("a default-agent fallback is refused before any prompt", async () => {
