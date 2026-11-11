@@ -21,7 +21,8 @@ process.env.OMP_ANTIGRAVITY_AGY = join(import.meta.dir, "..", "fixtures", "fake-
 process.env.OMP_ANTIGRAVITY_HOME = home;
 process.env.OMP_ANTIGRAVITY_DEFER_MS = "1500";
 process.env.OMP_ANTIGRAVITY_IDLE_TIMEOUT_MS = "2000";
-process.env.OMP_ANTIGRAVITY_ENV_PASSTHROUGH = "FAKE_AGY_LOG,FAKE_AGY_DEFAULT_AGENT,FAKE_AGY_COMMANDS_DELAY_MS,FAKE_AGY_STALL_SEED,FAKE_AGY_STUBBORN";
+process.env.OMP_ANTIGRAVITY_ENV_PASSTHROUGH =
+	"FAKE_AGY_LOG,FAKE_AGY_DEFAULT_AGENT,FAKE_AGY_COMMANDS_DELAY_MS,FAKE_AGY_SEED,FAKE_AGY_INIT_DELAY_MS,FAKE_AGY_STUBBORN,FAKE_AGY_WORKER";
 process.env.FAKE_AGY_LOG = logFile;
 // The cleanup under test is skipped when debug capture is on.
 delete process.env.OMP_ANTIGRAVITY_DEBUG;
@@ -45,6 +46,19 @@ function alive(pid: number): boolean {
 		return false;
 	}
 }
+
+/** The fake agy reads its knobs when it is spawned: set them only around the request that spawns it. */
+async function withEnv<T>(env: Record<string, string>, work: () => Promise<T>): Promise<T> {
+	Object.assign(process.env, env);
+	try {
+		return await work();
+	} finally {
+		for (const key of Object.keys(env)) delete process.env[key];
+	}
+}
+
+/** About 250 KB: delivered as one acknowledgement-only context part and one final part. */
+const bulk = Array.from({ length: 5000 }, (_, i) => `line ${i} ${"x".repeat(40)}`).join("\n");
 
 const model = {
 	id: "gemini-test",
@@ -113,7 +127,7 @@ async function run(runtime: InstanceType<typeof Runtime>, messages: Message[], o
 	};
 }
 
-const fakeLog = (): { pid: number; method: string; text?: string }[] =>
+const fakeLog = (): { pid: number; method: string; text?: string; worker?: number }[] =>
 	existsSync(logFile)
 		? readFileSync(logFile, "utf8")
 				.trim()
@@ -324,6 +338,9 @@ describe("guards and lifecycle", () => {
 		const aborted = await run(runtime, history, { sessionId: "unsent", state, signal: controller.signal, onPayload: () => void controller.abort() });
 		expect(aborted.message.stopReason).toBe("aborted");
 		expect(count("session/prompt", mark)).toBe(0);
+		// Nothing can use that session again: its process does not wait for the next request or the idle TTL.
+		const boot = fakeLog().slice(mark).find(e => e.method === "boot");
+		await waitFor(() => boot !== undefined && !alive(boot.pid), 2000);
 		history.push(aborted.message, user("SECOND-QUESTION"));
 		const next = await run(runtime, history, { sessionId: "unsent", state });
 		expect(next.message.stopReason).toBe("stop");
@@ -336,9 +353,8 @@ describe("guards and lifecycle", () => {
 		const state = new Map<string, ProviderSessionState>();
 		const controller = new AbortController();
 		const mark = fakeLog().length;
-		const filler = Array.from({ length: 5000 }, (_, i) => `line ${i} ${"x".repeat(40)}`).join("\n");
-		const history: Message[] = [user(`EARLY-MARKER\n${filler}\nLATE-MARKER`)];
-		process.env.FAKE_AGY_STALL_SEED = "1";
+		const history: Message[] = [user(`EARLY-MARKER\n${bulk}\nLATE-MARKER`)];
+		process.env.FAKE_AGY_SEED = "wait";
 		let aborted: Outcome;
 		try {
 			const pending = run(runtime, history, { sessionId: "seed-abort", state, signal: controller.signal });
@@ -346,7 +362,7 @@ describe("guards and lifecycle", () => {
 			controller.abort();
 			aborted = await pending;
 		} finally {
-			delete process.env.FAKE_AGY_STALL_SEED;
+			delete process.env.FAKE_AGY_SEED;
 		}
 		expect(aborted.message.stopReason).toBe("aborted");
 		expect(count("session/cancel", mark)).toBe(1);
@@ -420,5 +436,96 @@ describe("guards and lifecycle", () => {
 		} finally {
 			delete process.env.FAKE_AGY_STUBBORN;
 		}
+	});
+
+	test("a non-OMP tool attempt during a context part fails the request before any further part is sent", async () => {
+		const mark = fakeLog().length;
+		const out = await withEnv({ FAKE_AGY_SEED: "nativeok" }, () => run(runtime, [user(bulk)], { sessionId: "seed-native" }));
+		expect(out.message.stopReason).toBe("error");
+		expect(out.message.errorMessage).toContain("non-OMP tool (run_command)");
+		expect(count("session/prompt", mark)).toBe(1);
+	});
+
+	test("a rate limit during a context part surfaces as a 429", async () => {
+		const out = await withEnv({ FAKE_AGY_SEED: "ratelimit" }, () => run(runtime, [user(bulk)], { sessionId: "seed-ratelimit" }));
+		expect(out.message.stopReason).toBe("error");
+		expect(out.message.errorStatus).toBe(429);
+	});
+
+	test("a tool call during a context part is refused at once and delivery continues", async () => {
+		const mark = fakeLog().length;
+		const out = await withEnv({ FAKE_AGY_SEED: "call" }, () => run(runtime, [user(bulk)], { sessionId: "seed-call" }));
+		expect(out.message.stopReason).toBe("stop");
+		expect(out.calls).toEqual([]);
+		expect(count("session/prompt", mark)).toBe(2);
+	});
+
+	test("an inline continuation aborted before agy shows progress is rebuilt with its tool results", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const controller = new AbortController();
+		const mark = fakeLog().length;
+		const history: Message[] = [user('#fake:call read {"path":"a.txt"}')];
+		const first = await run(runtime, history, { sessionId: "inline-abort", state });
+		history.push(first.message, result(first.calls[0], "INLINE-RESULT"));
+		const pending = run(runtime, history, { sessionId: "inline-abort", state, signal: controller.signal });
+		controller.abort();
+		const aborted = await pending;
+		expect(aborted.message.stopReason).toBe("aborted");
+		history.push(aborted.message, user("what did it say?"));
+		const next = await run(runtime, history, { sessionId: "inline-abort", state });
+		expect(next.message.stopReason).toBe("stop");
+		expect(count("session/new", mark)).toBe(2);
+		expect(fakeLog().slice(mark).findLast(e => e.method === "session/prompt")?.text).toContain("INLINE-RESULT");
+	});
+
+	test("a request queued behind a provider state that then closes does not start a session for it", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const mark = fakeLog().length;
+		const first = run(runtime, [user("#fake:wait")], { sessionId: "queued-close", state });
+		await waitFor(() => count("session/prompt", mark) === 1);
+		const second = run(runtime, [user("#fake:wait"), user("again")], { sessionId: "queued-close", state });
+		state.get("antigravity-acp")?.close();
+		const outcomes = await Promise.all([first, second]);
+		expect(outcomes.map(o => o.message.stopReason)).toEqual(["error", "error"]);
+		expect(count("session/new", mark)).toBe(1);
+	});
+
+	test("a session closed while the host's payload hook runs ends the request instead of hanging it", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const mark = fakeLog().length;
+		const out = await run(runtime, [user("hello")], { sessionId: "hook-close", state, onPayload: () => void state.get("antigravity-acp")?.close() });
+		expect(out.message.stopReason).toBe("error");
+		expect(count("session/prompt", mark)).toBe(0);
+	});
+
+	test("closing a session kills a worker that outlives agy's main process", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const mark = fakeLog().length;
+		await withEnv({ FAKE_AGY_WORKER: "1" }, () => run(runtime, [user("hello")], { sessionId: "worker", state }));
+		const worker = fakeLog().slice(mark).find(e => e.method === "worker")?.worker;
+		expect(worker).toBeNumber();
+		state.get("antigravity-acp")?.close();
+		await waitFor(() => !alive(worker as number), 3000);
+	});
+
+	test("shutdown reaches an agy that has not finished initializing", async () => {
+		const own = new Runtime();
+		const mark = fakeLog().length;
+		process.env.FAKE_AGY_INIT_DELAY_MS = "3000";
+		process.env.FAKE_AGY_STUBBORN = "1";
+		let pending: Promise<Outcome>;
+		try {
+			pending = run(own, [user("hello")], { sessionId: "slow-init" });
+			await waitFor(() => fakeLog().slice(mark).some(e => e.method === "boot"));
+		} finally {
+			delete process.env.FAKE_AGY_INIT_DELAY_MS;
+			delete process.env.FAKE_AGY_STUBBORN;
+		}
+		const boot = fakeLog().slice(mark).find(e => e.method === "boot");
+		const closing = own.closeAll("OMP shut down");
+		own.killAll();
+		await waitFor(() => boot !== undefined && !alive(boot.pid), 1000);
+		await closing;
+		expect((await pending).message.stopReason).toBe("error");
 	});
 });

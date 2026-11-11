@@ -3,8 +3,10 @@
 // Environment knobs for failure modes:
 //   FAKE_AGY_DEFAULT_AGENT=1        offer default-agent commands (the restricted profile did not apply)
 //   FAKE_AGY_COMMANDS_DELAY_MS=<n>  send the command list <n> ms after session/new answers (default 5)
-//   FAKE_AGY_STALL_SEED=1           never acknowledge the first context delivery part until cancelled
+//   FAKE_AGY_SEED=<directive>       the first context delivery part acts as that directive instead of acknowledging
+//   FAKE_AGY_INIT_DELAY_MS=<n>      start answering (and so answer `initialize`) only after <n> ms
 //   FAKE_AGY_STUBBORN=1             ignore SIGTERM and outlive stdin closing for 30 s
+//   FAKE_AGY_WORKER=1               start a child in the same process group that ignores SIGTERM
 import { appendFileSync } from "node:fs";
 import { agent, ndJsonStream, PROTOCOL_VERSION } from "@agentclientprotocol/sdk";
 import type { ContentBlock, McpServer, SessionConfigOption } from "@agentclientprotocol/sdk";
@@ -15,6 +17,10 @@ const log = (entry: Record<string, unknown>) => {
 };
 log({ method: "boot" });
 if (process.env.FAKE_AGY_STUBBORN) process.on("SIGTERM", () => {});
+if (process.env.FAKE_AGY_WORKER) {
+	const worker = Bun.spawn(["sh", "-c", 'trap "" TERM; sleep 30'], { stdin: "ignore", stdout: "ignore", stderr: "ignore" });
+	log({ method: "worker", worker: worker.pid });
+}
 
 let model = "gemini-test";
 let effort = "medium";
@@ -107,40 +113,41 @@ const app = agent({ name: "fake-agy" })
 		const race = async <T>(work: Promise<T>) => Promise.race([work, cancelled]);
 		const usage = { inputTokens: 100, outputTokens: 7, cachedReadTokens: 50, cachedWriteTokens: 0, thoughtTokens: 2, totalTokens: 157 };
 		const done = (stopReason: "end_turn" | "cancelled") => ({ stopReason, usage });
-		if (process.env.FAKE_AGY_STALL_SEED && text.startsWith("[OMP delivery part 1/")) {
-			await cancelled;
-			return done("cancelled");
-		}
 
 		// Directives in replayed history are data; only the active request (after the replay) counts.
 		const active = text.slice(text.lastIndexOf("[end of OMP history]") + 1);
 		const at = active.lastIndexOf("#fake:");
 		const directive = at >= 0 ? /^#fake:(\w+)(?: (\S+))?(?: (\{[^\n]*?\}))?/.exec(active.slice(at)) : null;
+		const seed = text.startsWith("[OMP delivery part 1/") ? process.env.FAKE_AGY_SEED : undefined;
+		const [, name, arg, json] = seed ? ["", seed] : (directive ?? []);
 		if (text.includes("[OMP tool results")) {
 			await say(`delivered len=${text.length} tail=${text.includes("TAIL-MARKER") ? "yes" : "no"}`);
 			return done("end_turn");
 		}
-		switch (directive?.[1]) {
+		switch (name) {
 			case "call": {
-				const outcome = await race(callTool(directive[2] ?? "read", JSON.parse(directive[3] ?? "{}")));
+				const outcome = await race(callTool(arg ?? "read", JSON.parse(json ?? "{}")));
 				if (outcome === "cancelled") return done("cancelled");
 				await say(`result:${outcome.length}:${outcome.slice(0, 80)}`);
 				return done("end_turn");
 			}
 			case "calls2": {
-				const [a, b] = (directive[2] ?? "read,grep").split(",");
+				const [a, b] = (arg ?? "read,grep").split(",");
 				// gapMs holds the second call back until the host has closed its batch.
-				const gap = Number(JSON.parse(directive[3] ?? "{}").gapMs ?? 0);
+				const gap = Number(JSON.parse(json ?? "{}").gapMs ?? 0);
 				const outcome = await race(Promise.all([callTool(a, { n: 1 }), Bun.sleep(gap).then(() => callTool(b, { n: 2 }))]));
 				if (outcome === "cancelled") return done("cancelled");
 				await say(`results:${outcome.map(r => r.slice(0, 40)).join("|")}`);
 				return done("end_turn");
 			}
 			case "native":
+			case "nativeok":
 				await client.notify("session/update", {
 					sessionId,
 					update: { sessionUpdate: "tool_call", toolCallId: "native-1", title: "Run run_command", kind: "execute", status: "in_progress", name: "run_command" } as never,
 				});
+				// `nativeok` ends the turn normally before any cancel can land.
+				if (name === "nativeok") return done("end_turn");
 				await cancelled;
 				return done("cancelled");
 			case "ratelimit":
@@ -163,6 +170,7 @@ const stdout = new WritableStream<Uint8Array>({
 		process.stdout.write(chunk);
 	},
 });
+await Bun.sleep(Number(process.env.FAKE_AGY_INIT_DELAY_MS ?? 0));
 const connection = app.connect(ndJsonStream(stdout, Bun.stdin.stream()));
 await connection.closed;
 if (process.env.FAKE_AGY_STUBBORN) await Bun.sleep(30_000);

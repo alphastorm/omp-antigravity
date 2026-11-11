@@ -420,10 +420,9 @@ export class AgentProcess {
 			};
 			signal("SIGTERM");
 			const exited = await Promise.race([this.#proc.exited.then(() => true), Bun.sleep(2000).then(() => false)]);
-			if (!exited) {
-				signal("SIGKILL");
-				await Promise.race([this.#proc.exited, Bun.sleep(1000)]);
-			}
+			// The leader's exit says nothing about a worker it started: sweep the whole group either way.
+			signal("SIGKILL");
+			if (!exited) await Promise.race([this.#proc.exited, Bun.sleep(1000)]);
 			this.#forgetConversations();
 		})();
 		return this.#closing;
