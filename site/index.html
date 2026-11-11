@@ -1,0 +1,324 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#060809">
+<meta name="robots" content="index,follow">
+<title>OMP Antigravity — Antigravity serves the model. Oh My Pi keeps control.</title>
+<meta name="description" content="Use Antigravity-served Gemini, Claude, and GPT-OSS models in Oh My Pi through Google's official agy CLI. Oh My Pi keeps its own system prompt, tools, approval policy, and session transcript.">
+<link rel="canonical" href="https://alphastorm.github.io/omp-antigravity/">
+<link rel="preload" href="fonts/space-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="site.css">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta property="og:title" content="OMP Antigravity — Antigravity serves the model. Oh My Pi keeps control.">
+<meta property="og:description" content="Antigravity-served models for Oh My Pi. Google's official agy CLI over the Agent Client Protocol, under your own Google sign-in. Oh My Pi keeps its own system prompt, tools, approval policy, and session transcript.">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://alphastorm.github.io/omp-antigravity/">
+<meta property="og:image" content="https://alphastorm.github.io/omp-antigravity/og.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="OMP Antigravity, Antigravity-served models for Oh My Pi: Antigravity serves the model. Oh My Pi keeps control. Gemini, Claude, and GPT-OSS through Google's official agy CLI. A turn runs in Antigravity's lane; each tool call drops to Oh My Pi and returns.">
+<meta name="twitter:card" content="summary_large_image">
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "SoftwareApplication",
+ "name": "OMP Antigravity", "alternateName": "omp-antigravity", "applicationCategory": "DeveloperApplication",
+ "operatingSystem": "macOS", "softwareVersion": "0.1.0",
+ "description": "Extension for the Oh My Pi coding agent that registers the antigravity-acp model provider. Requests go through Google's official Antigravity CLI over the Agent Client Protocol, and Oh My Pi keeps its own system prompt, tools, approval policy, and session transcript.",
+ "url": "https://alphastorm.github.io/omp-antigravity/", "codeRepository": "https://github.com/alphastorm/omp-antigravity",
+ "license": "https://github.com/alphastorm/omp-antigravity/blob/main/LICENSE"}
+</script>
+</head>
+<body>
+<a class="skip-link" href="#main">Skip to content</a>
+<header class="site">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="logo.svg" alt="" width="24" height="24">OMP Antigravity</a>
+    <nav aria-label="Site">
+      <a href="#how-it-works">How it works</a>
+      <a href="#boundary">Data and terms</a>
+      <a href="#status">Status</a>
+      <a class="ext" href="https://github.com/alphastorm/omp-antigravity#documentation">Docs</a>
+      <a class="ext" href="https://github.com/alphastorm/omp-antigravity">GitHub</a>
+    </nav>
+  </div>
+</header>
+<main id="main">
+<section class="hero" aria-labelledby="headline">
+  <div class="wrap">
+    <div class="hero-head">
+      <p class="eyebrow">Antigravity-served models for Oh My Pi</p>
+      <h1 id="headline"><span class="line">Antigravity serves the model.</span> <span class="line lift">Oh My Pi keeps control.</span></h1>
+    </div>
+    <div class="hero-body">
+    <div>
+      <p class="lede">OMP Antigravity adds the <code>antigravity-acp</code> provider to Oh My Pi. Each request goes through Google's official Antigravity CLI, <code>agy</code>, under your own Google sign-in. Oh My Pi keeps its own system prompt, tools, approval policy, and session transcript.</p>
+      <div class="actions">
+        <a class="cta" href="#setup">Get started</a>
+        <a class="cta secondary" href="#how-it-works">How it works</a>
+      </div>
+      <ul class="facts" aria-label="Requirements">
+        <li class="label" aria-hidden="true">Requires</li>
+        <li>Oh My Pi</li>
+        <li>Google's agy CLI</li>
+        <li>A Google account</li>
+      </ul>
+      <p class="compatibility">Your Google sign-in stays in the OS keyring; the extension never reads, copies, or refreshes the token. <a href="#terms">Read Google's Antigravity terms</a> before you install.</p>
+    </div>
+    <figure class="visual">
+      <div class="terminal" aria-label="Illustrated runtime check output">
+        <div class="terminal-bar"><span>Runtime check</span><span>no generation</span></div>
+        <div class="terminal-body">
+          <p class="prompt"><span class="caret">›</span> /antigravity-doctor</p>
+          <p class="gap">omp-antigravity doctor: ok</p>
+          <p class="dim">agy: /Users/you/.local/bin/agy (1.5.5)</p>
+          <p class="dim">ACP agent: Antigravity ACP Server 1.5.5</p>
+          <p class="dim">signed in: yes</p>
+          <p class="gap">model antigravity-acp/gemini-4-carbon — Gemini 4 Carbon; efforts: low, medium, high (default medium)</p>
+          <p>model antigravity-acp/gemini-4-argon — Gemini 4 Argon; efforts: low, medium, high (default medium)</p>
+          <p>model antigravity-acp/gemini-3.8-flash — Gemini 3.8 Flash; efforts: low, medium, high (default medium)</p>
+          <p>model antigravity-acp/claude-opus-5-5 — Claude Opus 5.5; efforts: low, medium, high (default medium)</p>
+          <p>model antigravity-acp/claude-sonnet-5-5 — Claude Sonnet 5.5; efforts: low, medium, high (default medium)</p>
+          <p>model antigravity-acp/gpt-oss-120b-medium — GPT-OSS 120B (Medium); efforts: none (default n/a)</p>
+          <p class="dim gap">profile: /Users/you/.omp/antigravity-acp</p>
+        </div>
+      </div>
+      <figcaption>Illustration assembled from the extension's real output lines, shortened. The models listed are the ones your account is offered.</figcaption>
+    </figure>
+    </div>
+  </div>
+</section>
+
+<section id="how-it-works" aria-labelledby="how-heading">
+  <div class="wrap">
+    <div class="section-head">
+      <div><p class="eyebrow">How it works</p><h2 id="how-heading">One turn.<br>Two owners.</h2></div>
+      <p>The extension starts one <code>agy</code> process for each Oh My Pi session and bridges Oh My Pi's tools to the model over a loopback connection. <code>agy</code> runs a restricted profile that excludes its default tools, rules, and skills.</p>
+    </div>
+    <div class="owners">
+      <div class="owner">
+        <p class="k">Coding agent</p>
+        <h3>Oh My Pi</h3>
+        <p class="owns">Keeps control.</p>
+        <p>Its own system prompt, tools, approval policy, and session transcript.</p>
+      </div>
+      <div class="bridge">
+        <p class="k">ACP · loopback MCP</p>
+        <svg viewBox="12 6 72 84" role="img" aria-label="The OMP Antigravity mark as a diagram: Oh My Pi's cradle on the ground and the model lifted clear of it.">
+          <rect x="18" y="44" width="10" height="40" rx="2" fill="#e8ecef"/>
+          <rect x="68" y="44" width="10" height="40" rx="2" fill="#e8ecef"/>
+          <rect x="18" y="74" width="60" height="10" rx="2" fill="#e8ecef"/>
+          <circle cx="48" cy="20" r="8" fill="#c4e05c"/>
+        </svg>
+        <p class="route">127.0.0.1 · bearer token</p>
+      </div>
+      <div class="owner model">
+        <p class="k">Google's official agy CLI</p>
+        <h3>Antigravity</h3>
+        <p class="owns">Serves the model.</p>
+        <p>Gemini, Claude, and GPT-OSS under your own Google sign-in, with its default tools, rules, and skills excluded.</p>
+      </div>
+    </div>
+    <ul class="outcomes">
+      <li><p class="k">The model calls a tool</p><h3>Oh My Pi runs it.</h3><p>Under its own approval policy. The call is held open and answered in place.</p></li>
+      <li><p class="k">A large or slow result</p><h3>It arrives as the next prompt.</h3><p>The whole result, in parts if it is long.</p></li>
+      <li class="fail"><p class="k">agy tries its own tool</p><h3>The turn fails.</h3><p>Only Oh My Pi's tools run. The session is rebuilt from its transcript.</p></li>
+    </ul>
+    <p class="workflow-note">When Oh My Pi's transcript and the live <code>agy</code> session stop matching, after a branch, a rewind, a compaction, or a change of model, the extension opens a new session and replays the transcript. <a href="https://github.com/alphastorm/omp-antigravity/blob/main/docs/ARCHITECTURE.md">Read the architecture</a>.</p>
+  </div>
+</section>
+
+<section id="boundary" aria-labelledby="boundary-heading">
+  <div class="wrap">
+    <div class="section-head">
+      <div><p class="eyebrow">Data and terms</p><h2 id="boundary-heading">What goes to Google.<br>What stays with you.</h2></div>
+      <p>The model runs on Google's service, under your account. Tool execution, approvals, and the transcript of record stay in Oh My Pi.</p>
+    </div>
+    <div class="two-columns">
+      <div>
+        <h3>Goes to Google</h3>
+        <ul class="quiet-list">
+          <li><strong>Everything the model reads</strong><p>Oh My Pi's system prompt, your messages, and tool results travel through <code>agy</code> to Google, under your account and its settings.</p></li>
+          <li><strong>One extra call per conversation</strong><p><code>agy</code> makes one extra model call to title a conversation.</p></li>
+          <li><strong>Review and model improvement</strong><p>Google's terms allow human review of interactions and their use for model improvement, subject to your account settings. Do not send material through this provider that you are not permitted to share with Google.</p></li>
+        </ul>
+      </div>
+      <div>
+        <h3>Stays with you</h3>
+        <ul class="quiet-list">
+          <li><strong>Your Google credentials</strong><p><code>agy</code> keeps them in the OS keyring. The extension never reads, copies, or refreshes the token.</p></li>
+          <li><strong>Tool execution</strong><p>Every tool runs in Oh My Pi under its approval policy. If the model calls anything else, the turn fails.</p></li>
+          <li><strong>Your shell environment</strong><p><code>agy</code> receives an allowlist. API-key and Application Default Credentials variables are stripped, so an inherited variable cannot move it to a paid route.</p></li>
+          <li><strong>Transcripts on disk</strong><p><code>agy</code> writes each conversation under <code>~/.omp/antigravity-acp</code> while a session is open. The extension deletes a session's files when its process closes; titles and logs remain until you remove the directory.</p></li>
+        </ul>
+      </div>
+    </div>
+    <div class="notice" id="terms">
+      <h3>Read Google's terms before you install.</h3>
+      <p>Google documents <a href="https://antigravity.google/docs/cli/acp/"><code>agy acp</code></a> for editors and other ACP clients. Its <a href="https://antigravity.google/terms">Antigravity terms of service</a> also say:</p>
+      <blockquote>Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement. Such actions may be grounds for suspension or termination of your Antigravity and/or Gemini CLI accounts.</blockquote>
+      <p>Review the terms and judge whether your use is permitted. Nothing on this page is legal advice.</p>
+    </div>
+    <p class="section-note"><a href="https://github.com/alphastorm/omp-antigravity/blob/main/docs/SECURITY.md">Read the security model</a> for the child environment allowlist, the loopback tool bridge, and every file <code>agy</code> leaves behind.</p>
+  </div>
+</section>
+
+<section id="setup" aria-labelledby="setup-heading">
+  <div class="wrap">
+    <div class="section-head">
+      <div><p class="eyebrow">Get started</p><h2 id="setup-heading">Setup, in five steps.</h2></div>
+      <p>Install Google's CLI, sign in once, add the plugin, check the runtime, and start a session.</p>
+    </div>
+    <div class="setup-wrap">
+      <ol class="setup">
+        <li>
+          <h3>Install <code>agy</code></h3>
+          <div class="snippet" data-label="Shell"><pre><code>curl -fsSL https://antigravity.google/cli/install.sh | bash</code></pre></div>
+          <p>Google's official installer. It places the binary at <code>~/.local/bin/agy</code>. See <a href="https://antigravity.google/docs/install/">Google's install guide</a>.</p>
+        </li>
+        <li>
+          <h3>Sign in once</h3>
+          <div class="snippet" data-label="Shell"><pre><code>agy acp --login</code></pre></div>
+          <p>Credentials go to the OS keyring and are reused by <code>agy acp</code>.</p>
+        </li>
+        <li>
+          <h3>Add the plugin</h3>
+          <div class="snippet" data-label="Shell"><pre><code>omp plugin install \
+  github:alphastorm/omp-antigravity#f0a8720f838e135148211aa7b3aa8a4d4daa1aab</code></pre></div>
+          <p>Pinned to the commit of release 0.1.0. To run from a checkout instead, see <a href="https://github.com/alphastorm/omp-antigravity/blob/main/CONTRIBUTING.md#run-a-local-checkout-in-oh-my-pi">Contributing</a>.</p>
+        </li>
+        <li>
+          <h3>Check the runtime</h3>
+          <div class="snippet" data-label="Oh My Pi session"><pre><code>/antigravity-doctor</code></pre></div>
+          <p>Verifies the binary, the sign-in, the ACP capabilities, and the models your account is offered, without generating.</p>
+        </li>
+        <li>
+          <h3>Run a first prompt</h3>
+          <div class="snippet" data-label="Shell"><pre><code>omp --model antigravity-acp/gemini-4-argon --thinking high</code></pre></div>
+          <p>On the command line the effort is its own flag. In config files and agent definitions, write <code>antigravity-acp/&lt;model&gt;:&lt;effort&gt;</code>.</p>
+        </li>
+      </ol>
+      <aside class="setup-aside" aria-label="Before you start">
+        <h3>Before you start</h3>
+        <ul>
+          <li><span class="k">Platform</span><span>Tested on macOS arm64. Google's installer also supports Linux.</span></li>
+          <li><span class="k">Account</span><span>A Google account signed in to <code>agy</code>.</span></li>
+          <li><span class="k">Terms</span><span>Google's Antigravity terms restrict third-party access. <a href="#terms">Read the notice</a>.</span></li>
+        </ul>
+        <a href="https://github.com/alphastorm/omp-antigravity#requirements">Full requirements</a>
+      </aside>
+    </div>
+    <p class="section-note">Timeouts, the profile directory, and debug traces are set with environment variables. <a href="https://github.com/alphastorm/omp-antigravity/blob/main/docs/OPERATIONS.md#environment-variables">Environment variables</a> · <a href="https://github.com/alphastorm/omp-antigravity/blob/main/docs/OPERATIONS.md#error-messages">Error messages</a></p>
+  </div>
+</section>
+
+<section id="fit" aria-labelledby="fit-heading">
+  <div class="wrap">
+    <p class="eyebrow">Choose the right tool</p>
+    <div class="two-columns fit-columns">
+      <div>
+        <h2 id="fit-heading">Use it when</h2>
+        <ul class="quiet-list">
+          <li>You want Antigravity-served Gemini, Claude, or GPT-OSS models in Oh My Pi, with Oh My Pi's own tools, approvals, and transcript.</li>
+          <li>Oh My Pi's built-in <code>google-antigravity</code> provider is unavailable to you and the official <code>agy</code> CLI is not.</li>
+          <li>You want the sign-in handled by Google's own binary and the OS keyring, not by an extension.</li>
+        </ul>
+      </div>
+      <div>
+        <h2>Use something else when</h2>
+        <ul class="quiet-list">
+          <li>Google's Antigravity terms do not permit your use, or the material is not yours to share with Google.</li>
+          <li>You need steering messages to take effect in the middle of a turn. Here they wait for the next one.</li>
+          <li>You run many concurrent subagents on a small machine. Each live session holds its own pair of <code>agy</code> processes, about 300 MB.</li>
+          <li>You need a platform other than macOS arm64. The offline tests run on Linux; the live path has not.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="status" aria-labelledby="status-heading">
+  <div class="wrap">
+    <div class="section-head">
+      <div><p class="eyebrow">Status</p><h2 id="status-heading">First release.</h2></div>
+      <p>Version 0.1.0, tested by its maintainer on one platform. Google's CLI, its model catalog, and its limits can change underneath the extension.</p>
+    </div>
+    <!-- Release-pinned facts live together here. Update from docs/COMPATIBILITY.md and CHANGELOG.md; test/docs/surfaces.test.ts keeps them in step. -->
+    <dl class="status-ledger">
+      <div><dt>Release</dt><dd><a href="https://github.com/alphastorm/omp-antigravity/releases/tag/v0.1.0">omp-antigravity 0.1.0</a>, installed from GitHub and pinned to a commit.</dd></div>
+      <div><dt>Tested with</dt><dd>Oh My Pi <code>18.18.3</code> and <code>18.18.7</code>, <code>agy</code> <code>1.5.5</code>, and Bun <code>1.4.4</code>, on macOS arm64.</dd></div>
+      <div><dt>Models</dt><dd><code>gemini-4-carbon</code>, <code>gemini-4-argon</code>, <code>gemini-3.8-flash</code>, <code>claude-opus-5-5</code>, <code>claude-sonnet-5-5</code>, and <code>gpt-oss-120b-medium</code>, as offered to the signed-in account.<p class="small">Each model accepts only the effort levels <code>agy</code> advertises for it; another level is refused, never substituted.</p></dd></div>
+      <div><dt>Release checks</dt><dd>Offline unit and state-machine tests in CI. Live smoke on <code>gemini-3.8-flash</code> at low effort: text, a tool round trip, a tool-returned image, and a prompt image.<p class="small">Not exercised live: tool results delivered as a prompt, multi-part context delivery, aborts, and rate limits. The offline tests cover them against a scripted <code>agy</code>.</p></dd></div>
+      <div><dt>Rate limits</dt><dd>Google publishes no numeric request or token limits for Antigravity. A quota error fails the turn at once, so only Oh My Pi's retry policy decides the backoff.</dd></div>
+    </dl>
+    <p class="section-note"><a href="https://github.com/alphastorm/omp-antigravity/blob/main/docs/COMPATIBILITY.md">Tested versions and known limits</a> · <a href="https://github.com/alphastorm/omp-antigravity/blob/main/CHANGELOG.md">Changelog</a></p>
+  </div>
+</section>
+
+<section id="family" aria-labelledby="family-heading">
+  <div class="wrap">
+    <p class="eyebrow">Companion projects</p>
+    <h2 id="family-heading">The OMP family.</h2>
+    <ul class="family">
+      <li><h3><a href="https://carrythroughsystems.github.io/omp-session-gateway/">OMP Session Gateway <span aria-hidden="true">↗</span></a></h3><p>Every live session, one private page.</p></li>
+      <li><h3><a href="https://alphastorm.github.io/omp-ninfer/">OMP NInfer <span aria-hidden="true">↗</span></a></h3><p>Durable local inference for coding agents.</p></li>
+      <li><h3><a href="https://alphastorm.github.io/omp-oracle/">OMP Oracle <span aria-hidden="true">↗</span></a></h3><p>Send the hard question. Keep working.</p></li>
+      <li><h3><a href="https://alphastorm.github.io/omp-strata/">OMP Strata <span aria-hidden="true">↗</span></a></h3><p>Stock local inference. Nothing forked, everything pinned.</p></li>
+    </ul>
+  </div>
+</section>
+</main>
+<footer>
+  <div class="wrap">
+    <a class="brand" href="./"><img src="logo.svg" alt="" width="20" height="20">OMP Antigravity</a>
+    <ul class="links">
+      <li><a href="https://github.com/alphastorm/omp-antigravity">GitHub</a></li>
+      <li><a href="https://github.com/alphastorm/omp-antigravity#documentation">Documentation</a></li>
+      <li><a href="https://github.com/alphastorm/omp-antigravity/blob/main/CHANGELOG.md">Changelog</a></li>
+      <li><a href="https://github.com/alphastorm/omp-antigravity/blob/main/SECURITY.md">Security policy</a></li>
+      <li><a href="https://github.com/alphastorm/omp-antigravity/blob/main/LICENSE">MIT license</a></li>
+    </ul>
+    <p>Community project; not affiliated with or endorsed by the Oh My Pi maintainers or Google. Antigravity, Gemini, and Google are trademarks of Google LLC. Other model and product names belong to their owners and are used only to identify them.</p>
+  </div>
+</footer>
+<script>
+// Progressive enhancement from the family site: copy a runnable command. No network, storage, or
+// analytics. The commands stay selectable without JavaScript.
+if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+  for (const snippet of document.querySelectorAll(".snippet")) {
+    const code = snippet.querySelector("code");
+    if (!code) continue;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "copy-button";
+    button.textContent = "Copy";
+    button.setAttribute("aria-label", `Copy the ${snippet.dataset.label} command`);
+    button.setAttribute("aria-live", "polite");
+    let timer = 0;
+    button.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(code.textContent.trim());
+        button.textContent = "Copied";
+        button.setAttribute("data-done", "");
+      } catch {
+        button.textContent = "Select and copy";
+        button.removeAttribute("data-done");
+      }
+      clearTimeout(timer);
+      timer = setTimeout(() => { button.textContent = "Copy"; button.removeAttribute("data-done"); }, 1600);
+    });
+    const bar = document.createElement("div");
+    bar.className = "snippet-bar";
+    const label = document.createElement("span");
+    label.className = "lang";
+    label.textContent = snippet.dataset.label;
+    bar.append(label, button);
+    snippet.prepend(bar);
+    snippet.classList.add("has-copy-bar");
+  }
+}
+</script>
+</body>
+</html>

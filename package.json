@@ -1,22 +1,28 @@
 {
 	"name": "omp-antigravity",
 	"version": "0.1.0",
-	"description": "OMP provider for Google's official Antigravity CLI over ACP; OMP keeps its own tools, policy, and transcript",
+	"description": "Oh My Pi provider for Google's official Antigravity CLI (agy) over ACP; Oh My Pi keeps its own tools, approval policy, and transcript",
 	"type": "module",
 	"license": "MIT",
+	"homepage": "https://alphastorm.github.io/omp-antigravity/",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/alphastorm/omp-antigravity.git"
 	},
+	"bugs": {
+		"url": "https://github.com/alphastorm/omp-antigravity/issues"
+	},
 	"omp": {
 		"extensions": ["./src/index.ts"]
 	},
-	"files": ["src", "README.md", "LICENSE", "NOTICE.md"],
+	"files": ["src", "docs", "README.md", "CHANGELOG.md", "SECURITY.md", "LICENSE", "NOTICE.md"],
 	"scripts": {
 		"check": "tsc --noEmit",
 		"test": "bun test test/unit",
+		"test:docs": "bun test test/docs",
 		"test:live": "bun test/live/smoke.ts",
-		"doctor": "bun src/doctor.ts"
+		"doctor": "bun src/doctor.ts",
+		"render:assets": "bun scripts/render-assets.ts"
 	},
 	"dependencies": {
 		"@agentclientprotocol/sdk": "2.5.0",

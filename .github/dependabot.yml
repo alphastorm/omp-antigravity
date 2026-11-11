@@ -1,0 +1,10 @@
+version: 2
+updates:
+  # Package dependencies are pinned exactly and move only with a tested release: the ACP and MCP SDKs
+  # are checked against a live agy, and the @oh-my-pi packages name the Oh My Pi version under test.
+  # Only the pinned GitHub Actions are kept current here.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 3

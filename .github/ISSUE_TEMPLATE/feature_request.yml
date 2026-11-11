@@ -1,0 +1,38 @@
+name: Feature request
+description: Propose a scoped improvement to the extension
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the problem you have in Oh My Pi rather than only the preferred implementation.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: What changes for the person using Oh My Pi, and what stays the same.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security and privacy impact
+      description: Address the child environment, the tool bridge, the restricted agy profile, and local files where relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope checks
+      options:
+        - label: Oh My Pi keeps its own tools, approval policy, and transcript under this proposal; agy's own tools stay off.
+          required: true
+        - label: This does not read, copy, or refresh the Google sign-in token.
+          required: true

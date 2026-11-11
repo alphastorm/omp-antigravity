@@ -282,7 +282,7 @@ class LiveSession {
 					if (RETRY_NOTICE.test(update.content.text)) {
 						this.lastNotice = update.content.text.trim();
 						// Do not let agy's backoff chain run: one quota/rate-limit notice ends the turn so only
-						// OMP's retry policy applies (README "Rate limits").
+						// OMP's retry policy applies (docs/ARCHITECTURE.md "Rate limits").
 						if (RATE_LIMIT_NOTICE.test(this.lastNotice)) this.#rateLimited(this.lastNotice);
 						return;
 					}

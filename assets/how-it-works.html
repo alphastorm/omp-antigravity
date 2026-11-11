@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>OMP Antigravity — how it works</title>
+<link rel="stylesheet" href="brand.css">
+<style>
+  .how { width: 1240px; height: 580px; padding: 44px 48px 40px; display: grid; grid-template-rows: 20px 1fr auto; row-gap: 32px; }
+  .head { display: flex; align-items: center; gap: 20px; }
+  .head .rule { flex: 1; height: 1px; background: var(--line-strong); }
+  .nodes { display: grid; grid-template-columns: 1fr 290px 1fr; column-gap: 44px; align-items: start; align-self: center; }
+  .node h2 { margin: 16px 0 0; font-size: 44px; line-height: 1; letter-spacing: -.035em; font-weight: 600; }
+  .node .owns { margin: 16px 0 0; font-size: 24px; line-height: 1.2; font-weight: 500; }
+  .node.model .owns { color: var(--lift); }
+  .node p { margin: 8px 0 0; font-size: 19px; line-height: 1.42; color: var(--body); }
+  .bridge { text-align: center; }
+  .bridge svg { display: block; margin: 18px auto 0; }
+  .bridge .route { margin-top: 16px; font-family: "JetBrains Mono", monospace; font-size: 18px; color: var(--body); letter-spacing: .01em; }
+  .outcomes { display: grid; grid-template-columns: repeat(3, 1fr); column-gap: 44px; border-top: 1px solid var(--line-strong); padding-top: 26px; }
+  .when { display: flex; align-items: center; gap: 12px; }
+  .outcomes p { margin: 14px 0 0; font-size: 22px; line-height: 1.25; letter-spacing: -.005em; }
+  .outcomes small { display: block; margin-top: 8px; font-size: 18px; line-height: 1.35; color: var(--body); }
+</style>
+</head>
+<body>
+<div class="sheet how">
+  <div class="head">
+    <span class="label"><b>OMP Antigravity</b> · provider antigravity-acp</span>
+    <span class="rule"></span>
+    <span class="label">One agy process per session</span>
+  </div>
+  <div class="nodes">
+    <section class="node">
+      <div class="label">Coding agent</div>
+      <h2>Oh My Pi</h2>
+      <div class="owns">Keeps control.</div>
+      <p>Its own system prompt, tools, approval policy, and session transcript.</p>
+    </section>
+    <div class="bridge">
+      <div class="label">ACP · loopback MCP</div>
+      <svg width="270" height="150" viewBox="0 0 270 150" role="img" aria-label="The OMP Antigravity mark as a diagram: Oh My Pi’s cradle on the ground and the model lifted clear of it.">
+        <rect x="75" y="67" width="20" height="80" rx="4" fill="#e8ecef"/>
+        <rect x="175" y="67" width="20" height="80" rx="4" fill="#e8ecef"/>
+        <rect x="75" y="127" width="120" height="20" rx="4" fill="#e8ecef"/>
+        <circle cx="135" cy="19" r="16" fill="#c4e05c"/>
+      </svg>
+      <div class="route">127.0.0.1 · bearer token</div>
+    </div>
+    <section class="node model">
+      <div class="label">Google’s official agy CLI</div>
+      <h2>Antigravity</h2>
+      <div class="owns">Serves the model.</div>
+      <p>Gemini, Claude, and GPT-OSS under your own Google sign-in, with its default tools, rules, and skills excluded.</p>
+    </section>
+  </div>
+  <div class="outcomes">
+    <div><div class="when"><span class="dot"></span><span class="label">The model calls a tool</span></div><p>Oh My Pi runs it.</p><small>Under its own approval policy; the call is held open and answered in place.</small></div>
+    <div><div class="when"><span class="dot"></span><span class="label">A large or slow result</span></div><p>It arrives as the next prompt.</p><small>The whole result, in parts if long.</small></div>
+    <div><div class="when"><span class="dot fail"></span><span class="label">agy tries its own tool</span></div><p>The turn fails.</p><small>Only Oh My Pi’s tools run; the session is rebuilt from its transcript.</small></div>
+  </div>
+</div>
+</body>
+</html>

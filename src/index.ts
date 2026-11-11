@@ -14,8 +14,8 @@ const { AssistantMessageEventStream } = piAi as unknown as { AssistantMessageEve
 const OMP_EFFORTS = new Set(["minimal", "low", "medium", "high", "xhigh", "max"]);
 
 /**
- * agy reports no context or output limits. Documented conservative mapping by model family
- * (README "Model metadata"); OMP estimates occupancy itself and compacts against this window.
+ * agy reports no context or output limits. Fixed mapping by model family (docs/OPERATIONS.md
+ * "Model catalog and limits"); OMP estimates occupancy itself and compacts against this window.
  */
 function limitsFor(id: string): { contextWindow: number; maxTokens: number } {
 	if (id.startsWith("gemini-")) return { contextWindow: 500_000, maxTokens: 64_000 };
