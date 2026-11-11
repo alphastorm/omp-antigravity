@@ -8,7 +8,7 @@
 import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
-import type { RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk";
+import type { ContentBlock, RequestPermissionRequest, RequestPermissionResponse, SessionNotification } from "@agentclientprotocol/sdk";
 import type {
 	AssistantMessageEventStream,
 	Context,
@@ -18,7 +18,7 @@ import type {
 	SimpleStreamOptions,
 	ToolResultMessage,
 } from "@oh-my-pi/pi-ai";
-import { AdapterError, AgentProcess, defaultAgentLeak, ensureProfile, type PromptResult, type PromptUsage, type Profile } from "./acp.ts";
+import { AdapterError, AgentProcess, deadline, defaultAgentLeak, ensureProfile, type PromptResult, type PromptUsage, type Profile } from "./acp.ts";
 import { type ParkedCall, projectTools, ToolBridge } from "./bridge.ts";
 import {
 	addUsage,
@@ -48,10 +48,18 @@ const WARM_TTL_MS = ms("OMP_ANTIGRAVITY_WARM_TTL_MS", 20 * 60_000);
 const PENDING_TTL_MS = ms("OMP_ANTIGRAVITY_PENDING_TIMEOUT_MS", 12 * 60 * 60_000);
 const CANCEL_GRACE_MS = 5000;
 const STARTUP_MS = 60_000;
+/** How long agy may take to report its command list; 1.5.5 sends it about 12 ms after `session/new` answers. */
+const COMMANDS_MS = 5000;
 
 /** agy's own retry notices, emitted as agent text (e.g. "⚠ API error (attempt 2): RESOURCE_EXHAUSTED …"). */
 const RETRY_NOTICE = /^\s*⚠\s*API error \(attempt \d+\)/;
 const RATE_LIMIT_NOTICE = /RESOURCE_EXHAUSTED|\b429\b|rate.?limit|quota/i;
+/** What the model is told about a call that reached the bridge after the host had collected that turn's calls. */
+const NOT_RUN = "OMP did not run this tool call: it arrived after the host had collected this turn's calls. Call it again if you still need it.";
+/** Updates that show agy has taken in what it was last given: model output and tool events. */
+const PROGRESS: Record<string, true> = { agent_message_chunk: true, agent_thought_chunk: true, tool_call: true, tool_call_update: true };
+const CLOSED_WHILE_STARTING = "the OMP session closed while Antigravity was starting";
+const SCOPE_CLOSED = "OMP closed the provider session before this request started";
 
 /** OMP_ANTIGRAVITY_DEBUG=<dir> writes session setup, prompt payloads, and ACP updates there (contains prompt text). */
 function debugDump(name: string, value: unknown, append = false): void {
@@ -90,6 +98,7 @@ class KeyQueue {
 	readonly #tails = new Map<string, Promise<void>>();
 
 	async acquire(key: string, signal?: AbortSignal): Promise<() => void> {
+		if (signal?.aborted) throw new AdapterError("aborted", "Request aborted while queued");
 		const previous = this.#tails.get(key) ?? Promise.resolve();
 		const { promise: released, resolve: release } = Promise.withResolvers<void>();
 		const tail = previous.then(() => released);
@@ -170,17 +179,27 @@ class LiveSession {
 	#idleTimer: Timer | undefined;
 	#ttlTimer: Timer | undefined;
 	commands: string[] = [];
+	/** Settles when agy first reports its command list; fails if the session closes first. */
+	readonly #commandsSeen = Promise.withResolvers<void>();
 	#acceptEmpty = false;
 	lastNotice: string | undefined;
 	rateLimited: string | undefined;
 	/** The last turn was cut off by a rate-limit notice; OMP's identical retry re-asks in place. */
 	retryAfterLimit = false;
+	/** Aborted by close() and killNow(), so both reach a process that is still starting. */
+	readonly #startup = new AbortController();
+	/** An acknowledgement-only context part is in flight: no OMP stream exists to take tool calls. */
+	#seeding = false;
+	/** Tool results were resolved in place and agy has shown no progress since. */
+	#inlineUnconfirmed = false;
 
 	constructor(key: string, scope: Scope, runtime: Runtime, desired: Desired) {
 		this.key = key;
 		this.scope = scope;
 		this.runtime = runtime;
 		this.desired = desired;
+		// start() awaits this; a close after startup rejects it with nobody listening.
+		this.#commandsSeen.promise.catch(() => {});
 	}
 
 	get state(): string {
@@ -198,28 +217,47 @@ class LiveSession {
 		const mcpServer = this.bridge?.start();
 		this.agent = await AgentProcess.start({
 			profile,
-			signal,
+			signal: signal ? AbortSignal.any([signal, this.#startup.signal]) : this.#startup.signal,
 			timeoutMs: STARTUP_MS,
 			hooks: {
 				onUpdate: n => this.#onUpdate(n),
 				onPermission: r => this.#onPermission(r),
 				onExit: reason => this.#lose(reason),
 			},
+		}).catch(error => {
+			// close() aborts a start in progress; that is the session ending, not the request's own abort.
+			throw this.closed ? new AdapterError("process_exit", CLOSED_WHILE_STARTING) : error;
 		});
+		if (this.closed) {
+			// close() ran just as agy came up and had no process to stop. Nothing tracks this process any
+			// more, so it is killed here and now rather than closed gracefully.
+			this.agent.killNow();
+			throw new AdapterError("process_exit", CLOSED_WHILE_STARTING);
+		}
 		debugDump(`session-${Date.now()}.json`, { key: this.key, desired: this.desired });
-		const opened = await this.agent.openSession({
-			workspace: profile.workspace,
-			append: this.desired.instructions,
-			mcpServer,
-			model: this.desired.model,
-			effort: this.desired.effort,
-			signal,
-		});
-		this.acpSessionId = opened.sessionId;
-		this.selection = { model: opened.model, effort: opened.effort };
-		// The restricted profile must be live before any prompt: a default-agent command list means
-		// agy fell back to its default agent (native tools, rules, skills) and this session is unusable.
-		await Bun.sleep(50);
+		// An abort during the rest of startup kills agy, which fails its pending request at once. agy 1.5.5
+		// creates the conversation only as session/new answers, so a kill before that leaves no files.
+		const onAbort = () => this.agent.killNow();
+		signal?.addEventListener("abort", onAbort, { once: true });
+		try {
+			if (signal?.aborted) onAbort();
+			const opened = await this.agent.openSession({
+				workspace: profile.workspace,
+				append: this.desired.instructions,
+				mcpServer,
+				model: this.desired.model,
+				effort: this.desired.effort,
+			});
+			this.acpSessionId = opened.sessionId;
+			this.selection = { model: opened.model, effort: opened.effort };
+			// The restricted profile must be confirmed before any prompt. agy reports its command list right
+			// after session/new: a default-agent command means it fell back to its default agent (native
+			// tools, rules, skills), and no list at all leaves the profile unconfirmed. Either way this
+			// session is unusable.
+			await deadline(this.#commandsSeen.promise, COMMANDS_MS, "Antigravity's command list (needed to confirm the restricted omp-host profile)");
+		} finally {
+			signal?.removeEventListener("abort", onAbort);
+		}
 		const leak = defaultAgentLeak(this.commands);
 		if (leak) throw new AdapterError("profile", `Antigravity did not apply the restricted omp-host profile (offered /${leak})`);
 	}
@@ -236,6 +274,7 @@ class LiveSession {
 		const update = notification.update;
 		this.#trace({ update });
 		this.#touch();
+		if (PROGRESS[update.sessionUpdate]) this.#inlineUnconfirmed = false;
 		switch (update.sessionUpdate) {
 			case "agent_message_chunk":
 				if (update.content.type === "text") {
@@ -264,6 +303,7 @@ class LiveSession {
 			}
 			case "available_commands_update": {
 				this.commands = update.availableCommands.map(c => c.name);
+				this.#commandsSeen.resolve();
 				const leak = defaultAgentLeak(this.commands);
 				if (leak && this.acpSessionId) this.#violation(`Antigravity fell back to its default agent (offered /${leak})`);
 				return;
@@ -288,7 +328,8 @@ class LiveSession {
 	#onCall(call: ParkedCall): void {
 		this.#touch();
 		this.#trace({ parkedCall: { id: call.id, name: call.name, arguments: call.arguments } });
-		if (this.closed || !this.prompt || this.prompt.cancelled) {
+		this.#inlineUnconfirmed = false;
+		if (this.closed || !this.prompt || this.prompt.cancelled || this.#seeding) {
 			call.settle({ content: [{ type: "text", text: "No OMP turn is waiting for tool calls; end your turn." }], isError: true });
 			return;
 		}
@@ -339,12 +380,16 @@ class LiveSession {
 
 	async #cancelPrompt(text: string): Promise<void> {
 		const prompt = this.prompt;
+		// Captured now: a continuation may replace both lists while the cancel is still on its way.
+		const { pending, late } = this;
 		if (prompt && !prompt.cancelled) {
 			prompt.cancelled = true;
 			await this.agent.cancel(this.acpSessionId).catch(() => {});
 		}
-		for (const call of [...this.pending, ...this.late]) call.settle({ content: [{ type: "text", text }], isError: true });
-		this.late = this.late.filter(c => !c.settled);
+		for (const call of pending) call.settle({ content: [{ type: "text", text }], isError: true });
+		// Late calls were never offered to OMP: say so rather than promise a result. They stay listed so a
+		// deferred continuation can repeat that in its prompt.
+		for (const call of late) call.settle({ content: [{ type: "text", text: NOT_RUN }], isError: true });
 		if (prompt) {
 			const ended = await Promise.race([prompt.done.then(() => true, () => true), Bun.sleep(CANCEL_GRACE_MS).then(() => false)]);
 			if (!ended) this.#lose("Antigravity did not acknowledge cancellation");
@@ -360,6 +405,7 @@ class LiveSession {
 			this.#detachWriter();
 		}
 		void this.#cancelPrompt(`Stopped by omp-antigravity: ${reason}.`);
+		this.runtime.retire(this);
 	}
 
 	/**
@@ -389,19 +435,20 @@ class LiveSession {
 		});
 	}
 
-	/** Involuntary loss (process exit, protocol failure): surface it and tear down. */
+	/** Involuntary loss (process exit, protocol failure, stall): surface it and tear down. */
 	#lose(reason: string): void {
-		if (this.closed) return;
 		this.broken ??= reason;
+		// Also when already closed: a stream attached to a session that closed underneath it must still end.
 		const writer = this.writer;
 		if (writer && !writer.ended) {
 			writer.fail("error", `antigravity-acp: ${reason}`);
 			this.#detachWriter();
 		}
-		void this.runtime.closeLive(this, reason);
+		if (!this.closed) void this.runtime.closeLive(this, reason);
 	}
 
 	#touch(): void {
+		if (this.closed) return;
 		clearTimeout(this.#idleTimer);
 		if (this.writer && this.prompt) {
 			this.#idleTimer = setTimeout(() => this.#lose(`no Antigravity progress for ${Math.round(IDLE_PROMPT_MS / 1000)}s`), IDLE_PROMPT_MS);
@@ -445,6 +492,13 @@ class LiveSession {
 		if (!writer || writer.ended) return;
 		writer.fail("aborted", "Request aborted");
 		this.delivered.push(messageKey(writer.message));
+		if (this.#inlineUnconfirmed) {
+			// The cancel can overtake results resolved in place a moment ago, and agy may never record them.
+			this.broken ??= "aborted before Antigravity took in tool results resolved in place";
+			this.#detachWriter();
+			this.runtime.retire(this);
+			return;
+		}
 		// Keep this key's queue until agy confirms the cancel, so the next request finds the session idle
 		// instead of rebuilding around a turn that is still winding down.
 		const release = this.#releaseWriter;
@@ -460,8 +514,25 @@ class LiveSession {
 		}
 	}
 
-	/** Sends prompt parts; earlier parts are acknowledgement-only seeds whose output is discarded. */
-	async #send(parts: Awaited<ReturnType<typeof packPrompts>>, writer: StreamWriter, release: () => void, options: SimpleStreamOptions, model: Model): Promise<void> {
+	/**
+	 * Sends prompt parts. Callers record the request's messages as delivered first, so a failure before
+	 * the final part is attached leaves agy holding none or only some of them: the session is then
+	 * marked for a rebuild from OMP's transcript, and a turn still in flight is cancelled.
+	 */
+	async #send(parts: ContentBlock[][], writer: StreamWriter, release: () => void, options: SimpleStreamOptions, model: Model): Promise<void> {
+		try {
+			await this.#sendParts(parts, writer, release, options, model);
+		} catch (error) {
+			// Already broken means a violation or a loss ended this request; that reason is the one to report.
+			const cause = this.broken;
+			this.broken ??= `a request ended before its prompt was fully sent (${error instanceof Error ? error.message : String(error)})`;
+			if (this.prompt && !this.prompt.cancelled) void this.#cancelPrompt("The OMP request ended.");
+			throw cause && !(error instanceof AdapterError) ? new AdapterError("profile", cause) : error;
+		}
+	}
+
+	/** Earlier parts are acknowledgement-only seeds whose output is discarded; the last one streams to OMP. */
+	async #sendParts(parts: ContentBlock[][], writer: StreamWriter, release: () => void, options: SimpleStreamOptions, model: Model): Promise<void> {
 		if (this.broken) throw new AdapterError("profile", this.broken);
 		const previous = this.prompt;
 		if (previous) {
@@ -489,23 +560,38 @@ class LiveSession {
 				throw new AdapterError("protocol", "antigravity-acp cannot apply a replaced provider payload");
 			}
 			if (options.signal?.aborted) throw new AdapterError("aborted", "Request aborted");
-			if (last) this.#attachWriter(writer, release, options.signal);
+			// The awaits above can outlast the session: a violation, a loss, or a close ends the request here.
+			if (this.broken) throw new AdapterError("profile", this.broken);
+			if (this.closed) throw new AdapterError("process_exit", "the Antigravity session closed before its prompt was sent");
 			this.lastNotice = undefined;
 			const done = this.agent.prompt(this.acpSessionId, blocks);
 			const prompt = { done, cancelled: false };
 			this.prompt = prompt;
 			if (!last) {
-				const result = await done;
+				// No OMP stream is attached yet: an abort and a stalled agy are handled here, and tool calls are refused.
+				const onAbort = () => void this.#cancelPrompt("The OMP request was aborted.");
+				options.signal?.addEventListener("abort", onAbort, { once: true });
+				this.#seeding = true;
+				const result = await deadline(done, IDLE_PROMPT_MS, "Antigravity context delivery").finally(() => {
+					this.#seeding = false;
+					options.signal?.removeEventListener("abort", onAbort);
+				});
 				this.prompt = undefined;
 				this.carryUsage = addUsage(this.carryUsage, result.usage);
-				if (this.rateLimited) {
+				if (options.signal?.aborted) throw new AdapterError("aborted", "Request aborted");
+				// A violation or a loss during this part is the reason to report, whatever the part's stop reason.
+				if (this.broken) throw new AdapterError("profile", this.broken);
+				// Read from the notice itself: #rateLimited clears its own state once the cancel settles.
+				if (this.lastNotice && RATE_LIMIT_NOTICE.test(this.lastNotice)) {
 					// agy saw only part of the replay; a retry must rebuild rather than re-ask.
 					this.broken ??= "rate limited while delivering earlier context parts";
-					throw new AdapterError("rate_limited", `Antigravity rate limit (429 RESOURCE_EXHAUSTED): ${this.rateLimited}`);
+					throw new AdapterError("rate_limited", `Antigravity rate limit (429 RESOURCE_EXHAUSTED): ${this.lastNotice}`);
 				}
 				if (result.stopReason !== "end_turn") throw new AdapterError("protocol", `Antigravity stopped a context delivery part with ${result.stopReason}`);
 				continue;
 			}
+			// Attached only now that `prompt` is set, so the idle watchdog also covers a turn agy never starts.
+			this.#attachWriter(writer, release, options.signal);
 			void done.then(
 				result => this.#promptEnded(prompt, result),
 				error => this.#lose(`session/prompt failed: ${error instanceof Error ? error.message : String(error)}`),
@@ -515,6 +601,7 @@ class LiveSession {
 
 	#promptEnded(prompt: NonNullable<LiveSession["prompt"]>, result: PromptResult): void {
 		if (this.prompt === prompt) this.prompt = undefined;
+		this.#inlineUnconfirmed = false;
 		clearTimeout(this.#batchTimer);
 		this.#batchTimer = undefined;
 		const usage = addUsage(this.carryUsage, result.usage);
@@ -523,6 +610,7 @@ class LiveSession {
 			this.carryUsage = usage;
 			if (!prompt.cancelled && (this.pending.some(c => !c.settled) || this.late.some(c => !c.settled))) {
 				this.broken ??= "Antigravity ended its turn while OMP tool calls were pending";
+				this.runtime.retire(this);
 			}
 			return;
 		}
@@ -558,6 +646,7 @@ class LiveSession {
 		if (outcome === "error") this.broken ??= `previous turn failed (${result.stopReason})`;
 		else this.delivered.push(messageKey(writer.message));
 		this.#detachWriter();
+		if (this.broken) this.runtime.retire(this);
 	}
 
 	// ---- request entry points ----------------------------------------------------------------
@@ -629,40 +718,51 @@ class LiveSession {
 		clearTimeout(this.#deferTimer);
 		this.#deferTimer = undefined;
 		const pending = this.pending;
-		this.pending = [];
 		this.delivered = messages.map(messageKey);
 		const inline = pending.map(call => inlineResult(match.results.get(call.id)!));
 		const canInline =
 			!this.deferred && this.prompt !== undefined && !this.prompt.cancelled && match.tail.length === 0 && pending.every(c => !c.settled) && inline.every(Boolean);
 		if (canInline) {
+			this.pending = [];
+			// Set before attaching: an abort that is already signalled runs from inside #attachWriter.
+			this.#inlineUnconfirmed = true;
 			this.#attachWriter(writer, release, options.signal);
+			if (writer.ended) return;
 			pending.forEach((call, i) => {
 				this.#trace({ inlineResult: { id: call.id, name: call.name, result: inline[i] } });
 				call.settle(inline[i]!);
 			});
-			const late = this.late;
+			// A late call agy has already withdrawn is not offered to OMP.
+			const late = this.late.filter(call => !call.settled);
 			this.late = [];
 			for (const call of late) {
 				writer.toolCall(call);
 				this.pending.push(call);
 			}
-			if (late.length) this.#scheduleBatch();
+			if (late.length) {
+				this.#scheduleBatch();
+				this.#armDefer();
+			}
 			return;
 		}
 		if (this.prompt && !this.prompt.cancelled) {
 			this.deferred = true;
 			await this.#cancelPrompt("The host delivers this result in its next message.");
 		}
-		this.deferred = false;
+		const notRun = this.late;
+		this.pending = [];
 		this.late = [];
+		this.deferred = false;
 		const deliveries = pending.map(call => ({ call, result: match.results.get(call.id)! }));
-		const parts = packPrompts([...toolResultSegments(deliveries), ...inputSegments(match.tail), ...choiceNote(options)]);
+		const parts = packPrompts([...toolResultSegments(deliveries, notRun), ...inputSegments(match.tail), ...choiceNote(options)]);
 		await this.#send(parts, writer, release, options, model);
 	}
 
 	async close(reason: string): Promise<void> {
 		if (this.closed) return;
 		this.closed = true;
+		this.#startup.abort();
+		this.#commandsSeen.reject(new AdapterError("process_exit", `the Antigravity session closed during startup (${reason})`));
 		for (const timer of [this.#batchTimer, this.#deferTimer, this.#idleTimer, this.#ttlTimer]) clearTimeout(timer);
 		const writer = this.writer;
 		if (writer && !writer.ended) {
@@ -678,6 +778,7 @@ class LiveSession {
 	}
 
 	killNow(): void {
+		this.#startup.abort();
 		this.agent?.killNow();
 	}
 }
@@ -713,13 +814,9 @@ export class Runtime {
 	readonly #queue = new KeyQueue();
 	readonly #scopes = new WeakMap<Map<string, ProviderSessionState>, Scope>();
 	readonly #fallback = new Scope(this);
-	#profile: Profile | undefined;
+	/** Sessions whose close() has not finished: no longer registered, possibly still running. */
+	readonly #closing = new Set<LiveSession>();
 	#rebuilds: { at: number; key: string; reason: string }[] = [];
-
-	get profile(): Profile {
-		this.#profile ??= ensureProfile();
-		return this.#profile;
-	}
 
 	#scopeFor(state: Map<string, ProviderSessionState> | undefined): Scope {
 		if (!state) return this.#fallback;
@@ -750,21 +847,35 @@ export class Runtime {
 		if (live) await this.closeLive(live, reason);
 	}
 
+	/** A broken session can serve nothing further: release its process now and keep the reason for the doctor. */
+	retire(live: LiveSession): void {
+		if (live.closed) return;
+		this.#rebuild(live.key, live.broken ?? "session failed");
+		void this.closeLive(live, `rebuilding: ${live.broken}`);
+	}
+
 	/** Closes `live` and forgets it only if it is still the session registered for its key. */
 	async closeLive(live: LiveSession, reason: string): Promise<void> {
 		if (this.sessions.get(live.key) === live) {
 			this.sessions.delete(live.key);
 			live.scope.keys.delete(live.key);
 		}
-		await live.close(reason);
+		if (this.#closing.has(live)) return;
+		this.#closing.add(live);
+		try {
+			await live.close(reason);
+		} finally {
+			this.#closing.delete(live);
+		}
 	}
 
 	async closeAll(reason: string): Promise<void> {
 		await Promise.all([...this.sessions.keys()].map(key => this.closeKey(key, reason)));
 	}
 
+	/** Synchronous last resort; also reaches sessions whose close() is still waiting for agy to exit. */
 	killAll(): void {
-		for (const live of this.sessions.values()) live.killNow();
+		for (const live of [...this.sessions.values(), ...this.#closing]) live.killNow();
 	}
 
 	/** streamSimple body: never throws; failures end the stream with an error event. */
@@ -775,6 +886,8 @@ export class Runtime {
 		try {
 			const scope = this.#scopeFor(options.providerSessionState);
 			release = await this.#queue.acquire(key, options.signal);
+			// OMP may have closed the provider session while this request waited its turn.
+			if (scope.closed) throw new AdapterError("process_exit", SCOPE_CLOSED);
 			const desired = desiredFor(model, context, options);
 			let live = this.sessions.get(key);
 			if (live && (live.closed || live.scope !== scope)) {
@@ -820,11 +933,16 @@ export class Runtime {
 				await this.closeKey(key, `rebuilding: ${reason}`);
 				live = undefined;
 			}
+			// The point of effect for every path above: tearing down an old session takes seconds, and the
+			// request can be aborted or its provider session closed meanwhile. Nothing is started for either.
+			if (options.signal?.aborted) throw new AdapterError("aborted", "Request aborted");
+			if (scope.closed) throw new AdapterError("process_exit", SCOPE_CLOSED);
 			live = new LiveSession(key, scope, this, desired);
 			this.sessions.set(key, live);
 			scope.keys.add(key);
 			try {
-				await live.start(this.profile, options.signal);
+				// Re-asserted for every session: the agent file is what keeps agy off its default agent.
+				await live.start(ensureProfile(), options.signal);
 			} catch (error) {
 				await this.closeKey(key, "startup failed");
 				throw error;
@@ -840,11 +958,15 @@ export class Runtime {
 			const live = this.sessions.get(key);
 			const duplicate = error instanceof AdapterError && error.code === "duplicate_request";
 			if (live && live.writer === undefined && !aborted && !duplicate) live.broken ??= message;
+			if (live?.broken && live.writer === undefined) this.retire(live);
+			// Nothing can address an `ephemeral:` key again; do not hold its process until the idle TTL.
+			if (key.startsWith("ephemeral:")) void this.closeKey(key, "ephemeral request failed");
 		}
 	}
 
+	/** Nothing can address an `ephemeral:` key again, so its session ends with its only stream, parked calls included. */
 	async #closeWhenDone(live: LiveSession): Promise<void> {
-		while (!live.closed && (live.writer || live.prompt || live.pending.length)) await Bun.sleep(250);
+		while (!live.closed && live.writer) await Bun.sleep(250);
 		await this.closeKey(live.key, "ephemeral request finished");
 	}
 
@@ -860,6 +982,7 @@ export class Runtime {
 			tools: s.desired.tools.length,
 			delivered: s.delivered.length,
 			pending: s.pending.length,
+			late: s.late.length,
 			broken: s.broken,
 		}));
 	}

@@ -124,14 +124,16 @@ export interface ToolResultDelivery {
 	result: ToolResultMessage;
 }
 
-export function toolResultSegments(deliveries: readonly ToolResultDelivery[]): Segment[] {
-	if (deliveries.length === 0) return [];
+/** `notRun` lists calls that reached the bridge after the host had collected that turn's calls; OMP never saw them. */
+export function toolResultSegments(deliveries: readonly ToolResultDelivery[], notRun: readonly ToolResultDelivery["call"][] = []): Segment[] {
+	if (deliveries.length === 0 && notRun.length === 0) return [];
 	return [
 		"[OMP tool results: the host executed the tool calls from your previous turn; do not call them again]\n",
 		...deliveries.flatMap(({ call, result }) => [
 			`### Result of ${call.name}(${argsSummary(call.arguments)})${result.isError ? " (error)" : ""}\n`,
 			...contentSegments(result.content).map(s => (typeof s === "string" ? `${fence(s)}\n` : s)),
 		]),
+		...notRun.map(call => `### Not run: ${call.name}(${argsSummary(call.arguments)}). The host had already collected that turn's calls; call it again if you still need it.\n`),
 		"[end of OMP tool results]\n",
 	];
 }

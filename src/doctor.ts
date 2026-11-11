@@ -1,6 +1,6 @@
 // No-generation status report: executable, version, sign-in, capabilities, models, profile.
 // CLI: `bun src/doctor.ts` (exit 1 when the runtime is not usable).
-import { AdapterError, AgentProcess, type CatalogEntry, ensureProfile, resolveAgy } from "./acp.ts";
+import { AdapterError, AgentProcess, type CatalogEntry, childEnv, ensureProfile, resolveAgy } from "./acp.ts";
 
 export interface DoctorReport {
 	ok: boolean;
@@ -18,10 +18,13 @@ export async function doctor(): Promise<DoctorReport> {
 	let agent: AgentProcess | undefined;
 	try {
 		const path = resolveAgy();
-		const version = Bun.spawnSync([path, "--version"], { stdout: "pipe", stderr: "pipe" }).stdout.toString().trim();
-		report.agy = { path, version };
 		const profile = ensureProfile();
 		report.profile = profile;
+		// Same isolation as a session, and bounded: this call blocks the host's event loop while it runs.
+		const version = Bun.spawnSync([path, "--version"], { cwd: profile.workspace, env: childEnv(), timeout: 5000, stdout: "pipe", stderr: "pipe" })
+			.stdout.toString()
+			.trim();
+		report.agy = { path, version };
 		agent = await AgentProcess.start({
 			profile,
 			timeoutMs: 15_000,

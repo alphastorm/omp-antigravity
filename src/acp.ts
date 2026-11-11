@@ -172,7 +172,7 @@ export interface SessionSelection {
 	efforts: string[];
 }
 
-function deadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+export function deadline<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
 	const { promise: timeout, reject } = Promise.withResolvers<never>();
 	const timer = setTimeout(() => reject(new AdapterError("timeout", `${what} timed out after ${Math.round(ms / 1000)}s`)), ms);
 	return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
@@ -235,6 +235,8 @@ export class AgentProcess {
 	}
 
 	static async start(options: { profile: Profile; hooks: AgentHooks; signal?: AbortSignal; timeoutMs?: number }): Promise<AgentProcess> {
+		// The abort listener below never fires for a signal that is already aborted: spawn nothing for it.
+		if (options.signal?.aborted) throw new AdapterError("aborted", "Antigravity startup aborted");
 		const path = resolveAgy();
 		const args = [path, "acp", "--process-per-session", "--gemini-dir", options.profile.geminiDir, "--agent", AGENT_PROFILE];
 		const proc = Bun.spawn(args, {
@@ -319,7 +321,6 @@ export class AgentProcess {
 		mcpServer?: McpServer;
 		model: string;
 		effort: string | undefined;
-		signal?: AbortSignal;
 	}): Promise<SessionSelection> {
 		const caps = this.capabilities;
 		if (!caps.appendInstructions) {
@@ -421,10 +422,9 @@ export class AgentProcess {
 			};
 			signal("SIGTERM");
 			const exited = await Promise.race([this.#proc.exited.then(() => true), Bun.sleep(2000).then(() => false)]);
-			if (!exited) {
-				signal("SIGKILL");
-				await Promise.race([this.#proc.exited, Bun.sleep(1000)]);
-			}
+			// The leader's exit says nothing about a worker it started: sweep the whole group either way.
+			signal("SIGKILL");
+			if (!exited) await Promise.race([this.#proc.exited, Bun.sleep(1000)]);
 			this.#forgetConversations();
 		})();
 		return this.#closing;
