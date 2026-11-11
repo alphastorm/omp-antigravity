@@ -59,6 +59,7 @@ const NOT_RUN = "OMP did not run this tool call: it arrived after the host had c
 /** Updates that show agy has taken in what it was last given: model output and tool events. */
 const PROGRESS: Record<string, true> = { agent_message_chunk: true, agent_thought_chunk: true, tool_call: true, tool_call_update: true };
 const CLOSED_WHILE_STARTING = "the OMP session closed while Antigravity was starting";
+const SCOPE_CLOSED = "OMP closed the provider session before this request started";
 
 /** OMP_ANTIGRAVITY_DEBUG=<dir> writes session setup, prompt payloads, and ACP updates there (contains prompt text). */
 function debugDump(name: string, value: unknown, append = false): void {
@@ -228,8 +229,9 @@ class LiveSession {
 			throw this.closed ? new AdapterError("process_exit", CLOSED_WHILE_STARTING) : error;
 		});
 		if (this.closed) {
-			// close() ran just as agy came up and had no process to stop.
-			await this.agent.close();
+			// close() ran just as agy came up and had no process to stop. Nothing tracks this process any
+			// more, so it is killed here and now rather than closed gracefully.
+			this.agent.killNow();
 			throw new AdapterError("process_exit", CLOSED_WHILE_STARTING);
 		}
 		debugDump(`session-${Date.now()}.json`, { key: this.key, desired: this.desired });
@@ -577,6 +579,8 @@ class LiveSession {
 				this.prompt = undefined;
 				this.carryUsage = addUsage(this.carryUsage, result.usage);
 				if (options.signal?.aborted) throw new AdapterError("aborted", "Request aborted");
+				// A violation or a loss during this part is the reason to report, whatever the part's stop reason.
+				if (this.broken) throw new AdapterError("profile", this.broken);
 				// Read from the notice itself: #rateLimited clears its own state once the cancel settles.
 				if (this.lastNotice && RATE_LIMIT_NOTICE.test(this.lastNotice)) {
 					// agy saw only part of the replay; a retry must rebuild rather than re-ask.
@@ -883,7 +887,7 @@ export class Runtime {
 			const scope = this.#scopeFor(options.providerSessionState);
 			release = await this.#queue.acquire(key, options.signal);
 			// OMP may have closed the provider session while this request waited its turn.
-			if (scope.closed) throw new AdapterError("process_exit", "OMP closed the provider session before this request started");
+			if (scope.closed) throw new AdapterError("process_exit", SCOPE_CLOSED);
 			const desired = desiredFor(model, context, options);
 			let live = this.sessions.get(key);
 			if (live && (live.closed || live.scope !== scope)) {
@@ -929,6 +933,10 @@ export class Runtime {
 				await this.closeKey(key, `rebuilding: ${reason}`);
 				live = undefined;
 			}
+			// The point of effect for every path above: tearing down an old session takes seconds, and the
+			// request can be aborted or its provider session closed meanwhile. Nothing is started for either.
+			if (options.signal?.aborted) throw new AdapterError("aborted", "Request aborted");
+			if (scope.closed) throw new AdapterError("process_exit", SCOPE_CLOSED);
 			live = new LiveSession(key, scope, this, desired);
 			this.sessions.set(key, live);
 			scope.keys.add(key);

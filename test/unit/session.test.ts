@@ -438,9 +438,10 @@ describe("guards and lifecycle", () => {
 		}
 	});
 
-	test("a non-OMP tool attempt during a context part fails the request before any further part is sent", async () => {
+	// `native` waits for the adapter's cancel; `nativeok` ends the part normally before any cancel can land.
+	test.each(["native", "nativeok"])("a non-OMP tool attempt during a context part (%s) fails the request before any further part is sent", async seed => {
 		const mark = fakeLog().length;
-		const out = await withEnv({ FAKE_AGY_SEED: "nativeok" }, () => run(runtime, [user(bulk)], { sessionId: "seed-native" }));
+		const out = await withEnv({ FAKE_AGY_SEED: seed }, () => run(runtime, [user(bulk)], { sessionId: `seed-${seed}` }));
 		expect(out.message.stopReason).toBe("error");
 		expect(out.message.errorMessage).toContain("non-OMP tool (run_command)");
 		expect(count("session/prompt", mark)).toBe(1);
@@ -488,6 +489,32 @@ describe("guards and lifecycle", () => {
 		const outcomes = await Promise.all([first, second]);
 		expect(outcomes.map(o => o.message.stopReason)).toEqual(["error", "error"]);
 		expect(count("session/new", mark)).toBe(1);
+	});
+
+	test("a provider state that closes while an old session is torn down for a rebuild gets no new session", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const mark = fakeLog().length;
+		await withEnv({ FAKE_AGY_STUBBORN: "1" }, () => run(runtime, [user("hello")], { sessionId: "rebuild-close", state }));
+		// A different transcript forces a rebuild; the stubborn agy keeps its teardown going for two seconds.
+		const pending = run(runtime, [user("something else")], { sessionId: "rebuild-close", state });
+		await waitFor(() => !runtime.sessions.has("rebuild-close"));
+		state.get("antigravity-acp")?.close();
+		const out = await pending;
+		expect(out.message.stopReason).toBe("error");
+		expect(count("session/new", mark)).toBe(1);
+	});
+
+	test("a request aborted while an old session is torn down for a rebuild starts no agy", async () => {
+		const state = new Map<string, ProviderSessionState>();
+		const controller = new AbortController();
+		const mark = fakeLog().length;
+		await withEnv({ FAKE_AGY_STUBBORN: "1" }, () => run(runtime, [user("hello")], { sessionId: "rebuild-abort", state }));
+		const pending = run(runtime, [user("something else")], { sessionId: "rebuild-abort", state, signal: controller.signal });
+		await waitFor(() => !runtime.sessions.has("rebuild-abort"));
+		controller.abort();
+		const out = await pending;
+		expect(out.message.stopReason).toBe("aborted");
+		expect(count("boot", mark)).toBe(1);
 	});
 
 	test("a session closed while the host's payload hook runs ends the request instead of hanging it", async () => {

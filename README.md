@@ -285,7 +285,7 @@ Install dependencies and run the offline checks:
 ```bash
 bun install
 bun run check   # tsc --noEmit
-bun test        # 38 offline unit and state-machine tests (uses test/fixtures/fake-agy)
+bun test        # 41 offline unit and state-machine tests (uses test/fixtures/fake-agy)
 ```
 
 `bun test` runs completely offline: `test/unit/convert.test.ts` checks prompt packing, tilde fencing, `RFC 2119` instruction rewording, inline result budgets, usage mapping, and stream events, while `test/unit/session.test.ts` drives the session state machine against the scripted fake `agy` executable in `test/fixtures/`.

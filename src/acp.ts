@@ -235,6 +235,8 @@ export class AgentProcess {
 	}
 
 	static async start(options: { profile: Profile; hooks: AgentHooks; signal?: AbortSignal; timeoutMs?: number }): Promise<AgentProcess> {
+		// The abort listener below never fires for a signal that is already aborted: spawn nothing for it.
+		if (options.signal?.aborted) throw new AdapterError("aborted", "Antigravity startup aborted");
 		const path = resolveAgy();
 		const args = [path, "acp", "--process-per-session", "--gemini-dir", options.profile.geminiDir, "--agent", AGENT_PROFILE];
 		const proc = Bun.spawn(args, {
