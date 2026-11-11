@@ -1,6 +1,6 @@
 // The official Antigravity CLI (`agy acp`) as a child process speaking ACP v1 over stdio.
 //
-// Runtime contract (qualified against agy 1.5.5, see README "Runtime contract"):
+// Runtime contract (qualified against agy 1.5.5, see docs/ARCHITECTURE.md):
 // - OMP instructions are appended with `_meta.antigravity.systemPrompt.append` on `session/new`.
 // - Native tools, rules, skills, hooks, and ambient MCP are excluded by running the adapter's own
 //   custom agent (`excludeDefaultComponents: true`) from an adapter-owned `--gemini-dir`, with an

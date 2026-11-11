@@ -14,8 +14,9 @@ concurrency:
 
 jobs:
   check:
-    # Offline only: the state-machine tests drive a fake agy. The live smoke spends Antigravity
-    # quota and needs a signed-in agy, so it stays local (`bun run test:live`).
+    # Offline only: the state-machine tests drive a fake agy, and the documentation and site checks
+    # read files. The live smoke spends Antigravity quota and needs a signed-in agy, so it stays
+    # local (`bun run test:live`).
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -31,5 +32,7 @@ jobs:
         run: bun run check
       - name: Unit tests
         run: bun run test
+      - name: Documentation and site
+        run: bun run test:docs
       - name: Package contents
         run: bun pm pack --dry-run

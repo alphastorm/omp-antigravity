@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security vulnerability
+    url: https://github.com/alphastorm/omp-antigravity/security/advisories/new
+    about: Report vulnerabilities privately. Never include a token, a transcript, an account name, a private path, or a debug file.
+  - name: Oh My Pi defect
+    url: https://github.com/can1357/oh-my-pi/issues
+    about: Behavior of Oh My Pi itself belongs upstream.

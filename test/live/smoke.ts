@@ -25,7 +25,7 @@ const omp = process.env.OMP_BIN ?? Bun.which("omp", { PATH: searchPath });
 if (!omp) throw new Error("omp not found on PATH; set OMP_BIN");
 
 const dir = mkdtempSync(join(tmpdir(), "omp-antigravity-smoke-"));
-// Failures leave the ACP updates and tool traffic for diagnosis (README "Debugging").
+// Failures leave the ACP updates and tool traffic for diagnosis (docs/OPERATIONS.md "Debug traces").
 const debugDir = process.env.OMP_ANTIGRAVITY_DEBUG ?? join(dir, "debug");
 const nonce = `NONCE-${crypto.randomUUID().slice(0, 8)}`;
 writeFileSync(join(dir, "note.txt"), `${nonce}\n`);

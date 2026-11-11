@@ -31,5 +31,22 @@ Both projects are distributed under the MIT License:
 > DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 > OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-Antigravity, Gemini, and Google are trademarks of Google LLC. This project is not affiliated with
-or endorsed by Google.
+## Fonts
+
+The public site and the brand artwork use latin subsets of two typefaces. The files are in
+`site/fonts/` with their license texts beside them:
+
+- Space Grotesk, Copyright 2020 The Space Grotesk Project Authors
+  (<https://github.com/floriankarsten/space-grotesk>), SIL Open Font License 1.1:
+  `site/fonts/LICENSE-space-grotesk.txt`.
+- JetBrains Mono, Copyright 2020 The JetBrains Mono Project Authors
+  (<https://github.com/JetBrains/JetBrainsMono>), SIL Open Font License 1.1:
+  `site/fonts/LICENSE-jetbrains-mono.txt`.
+
+Neither typeface ships in the package: `site/` and `assets/` are repository-only.
+
+## Trademarks and affiliation
+
+Antigravity, Gemini, and Google are trademarks of Google LLC. Other model and product names belong to their owners and are used only to identify them.
+
+Community project; not affiliated with or endorsed by the Oh My Pi maintainers or Google.

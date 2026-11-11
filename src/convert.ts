@@ -16,7 +16,7 @@ import type { PromptUsage } from "./acp.ts";
 import { BRIDGE_SERVER } from "./bridge.ts";
 
 /**
- * Observed agy 1.5.5 transport limits (README "Runtime contract"): a single `session/prompt`
+ * Observed agy 1.5.5 transport limits (docs/COMPATIBILITY.md "Known limits"): a single `session/prompt`
  * message keeps only its first ~192,000 text bytes, and an MCP tool result keeps ~10,000 text bytes
  * (middle-truncated). Results above the inline budget are delivered as prompt text instead.
  */
@@ -31,7 +31,8 @@ const byteLength = (text: string) => encoder.encode(text).length;
  * OMP prompt text that agy 1.5.5's route rejects on Gemini 4 models with a misleading
  * `429 RESOURCE_EXHAUSTED` on the first attempt, mapped to text with the same meaning. Found on
  * 2026-11-10 by bisecting OMP's generated prompt against Gemini 4 Carbon: OMP's opening RFC 2119
- * line alone reproduced the 429, while every other part of the prompt passed (README "Limits").
+ * line alone reproduced the 429, while every other part of the prompt passed (docs/COMPATIBILITY.md
+ * "Gemini 4 rejects the RFC 2119 line").
  */
 const AGY_REWRITES: readonly (readonly [from: string, to: string])[] = [
 	[

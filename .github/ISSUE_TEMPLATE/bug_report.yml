@@ -1,0 +1,58 @@
+name: Bug report
+description: Report reproducible incorrect behavior of the extension without including private material
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Never paste a token, a transcript, an account name, a host or user name, a private path, or a file from a debug directory. Report security vulnerabilities privately instead of using this form. Behavior of `agy` or of Antigravity itself belongs to Google, and behavior of Oh My Pi belongs upstream; `docs/COMPATIBILITY.md` lists the `agy` limits already known.
+  - type: input
+    id: commit
+    attributes:
+      label: Extension commit
+      placeholder: the commit SHA you installed or checked out
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Oh My Pi and agy versions
+      placeholder: "omp 18.18.7, agy 1.5.5, macOS arm64"
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model and effort
+      placeholder: "antigravity-acp/gemini-4-argon:high"
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Expected and actual behavior, with the exact error text. Redact secrets, names, and private paths.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction steps
+      description: The smallest safe reproduction, with synthetic content.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics
+      description: The `/antigravity-doctor` or `bun run doctor` report, including any `recent rebuilds` lines, after you checked it for names and private paths.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Safety checks
+      options:
+        - label: This report contains no token, transcript, account name, host or user name, private path, or debug file.
+          required: true
+        - label: This is not a vulnerability requiring private disclosure.
+          required: true
+        - label: This is behavior of the extension, not of agy, Antigravity, or Oh My Pi alone.
+          required: true

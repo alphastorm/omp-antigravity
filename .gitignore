@@ -1,3 +1,8 @@
 node_modules/
 *.tgz
 .DS_Store
+
+# Staged into site/ from assets/ by .github/workflows/pages.yml; never commit copies.
+site/logo.svg
+site/favicon.svg
+site/og.png

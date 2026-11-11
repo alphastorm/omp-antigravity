@@ -1,0 +1,53 @@
+# OMP Antigravity
+
+> Extension for the Oh My Pi (OMP) coding agent that registers the `antigravity-acp` model provider.
+> Each request goes through Google's official Antigravity CLI (`agy acp`) over the Agent Client
+> Protocol (ACP), under the user's own Google sign-in. Antigravity serves Gemini, Claude, and GPT-OSS
+> models; Oh My Pi keeps its own system prompt, tools, approval policy, and session transcript.
+> First release, 0.1.0; tested on macOS arm64. Community project; not affiliated with or endorsed by
+> the Oh My Pi maintainers or Google.
+
+## Install
+
+- Requires Oh My Pi, the Antigravity CLI (`agy`), and a Google account signed in to `agy`. Tested on
+  macOS arm64 with Oh My Pi `18.18.3` and `18.18.7` and `agy` `1.5.5`. Linux is not live-tested;
+  Windows is unsupported.
+- Install `agy` with Google's installer (`curl -fsSL https://antigravity.google/cli/install.sh | bash`)
+  and sign in once with `agy acp --login`.
+- Install the extension pinned to the commit of release 0.1.0:
+  `omp plugin install github:alphastorm/omp-antigravity#f0a8720f838e135148211aa7b3aa8a4d4daa1aab`.
+- Check the runtime without generating: `/antigravity-doctor` in an Oh My Pi session. Then start a
+  session with `omp --model antigravity-acp/gemini-4-argon --thinking high`. In config files and
+  agent definitions the selector is `antigravity-acp/<model>:<effort>`.
+
+## Boundaries
+
+- Google's Antigravity terms of service say: "Using third party software, tools, or services to access the Service (e.g. using OpenClaw with Antigravity OAuth) is a breach of this Agreement. Such actions may be grounds for suspension or termination of your Antigravity and/or Gemini CLI accounts."
+  Google documents `agy acp` for editors and other ACP clients. Each user reviews the terms and
+  judges whether their use is permitted; nothing here is legal advice.
+- Google's terms allow human review of interactions and their use for model improvement, subject to
+  the account's settings. Everything the model reads (Oh My Pi's system prompt, the user's messages,
+  and tool results) goes to Google through `agy`.
+- The extension never reads, copies, or refreshes the Google sign-in token; `agy` keeps it in the OS
+  keyring. `agy` runs with an allowlisted environment from which API-key and Application Default
+  Credentials variables are stripped.
+- Each Oh My Pi session runs its own `agy` process in a restricted profile that excludes `agy`'s
+  default tools, rules, and skills. Oh My Pi's tools reach the model through a loopback MCP bridge on
+  `127.0.0.1` behind a per-session bearer token, and Oh My Pi runs every tool call under its own
+  approval policy. A call to any other tool fails the turn.
+- `agy` writes each conversation under `~/.omp/antigravity-acp` while a session is open. The
+  extension deletes a session's files when its process closes; titles and logs remain until the
+  directory is removed.
+
+## Canonical documents
+
+- [README](https://github.com/alphastorm/omp-antigravity#readme): what it is, when to use it, quick start, models and effort
+- [Operations](https://github.com/alphastorm/omp-antigravity/blob/main/docs/OPERATIONS.md): efforts, environment variables, the doctor report, error messages, debug traces, upgrade and uninstall
+- [Architecture](https://github.com/alphastorm/omp-antigravity/blob/main/docs/ARCHITECTURE.md): the runtime contract, from process start to tool continuation and rebuilds
+- [Security model](https://github.com/alphastorm/omp-antigravity/blob/main/docs/SECURITY.md): what reaches Google, Google's terms, credentials, the child environment, local files
+- [Compatibility](https://github.com/alphastorm/omp-antigravity/blob/main/docs/COMPATIBILITY.md): tested versions, platforms, known limits of `agy`, the release record
+- [Changelog](https://github.com/alphastorm/omp-antigravity/blob/main/CHANGELOG.md)
+
+## Web pages
+
+- [Overview](https://alphastorm.github.io/omp-antigravity/)
