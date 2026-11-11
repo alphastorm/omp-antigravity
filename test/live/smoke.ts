@@ -35,7 +35,9 @@ const cases: { name: string; args: string[]; expect: RegExp }[] = [
 	{ name: "text", args: ["--no-tools", "Reply with the single word PONG."], expect: /\bPONG\b/ },
 	{
 		name: "tool round trip",
-		args: ["--tools", "read", "Use the read tool on note.txt in the current directory, then reply with only its first line."],
+		// Asks for the token by its prefix, not its position: agy puts `Created At:` and `Completed At:` lines
+		// ahead of an inline tool result, and a model asked for "the first line" can answer with that line.
+		args: ["--tools", "read", "Use the read tool on note.txt in the current directory, then reply with only the token in it that starts with NONCE-."],
 		expect: new RegExp(nonce),
 	},
 	{
